@@ -24,6 +24,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.rename.RatReadPort
 import xiangshan.backend.Bundles._
+import xiangshan.backend.fu.matrix.Bundles.{MType}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.wrapper.CSRToDecode
@@ -57,7 +58,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     val fromCSR = Input(new CSRToDecode)
     val fusion = Vec(DecodeWidth - 1, Input(Bool()))
 
-    // vtype update
+    // vtype & mtype update
     val fromRob = new Bundle {
       val isResumeVType = Input(Bool())
       val walkToArchVType = Input(Bool())
@@ -66,6 +67,13 @@ class DecodeStage(implicit p: Parameters) extends XSModule
         val hasVsetvl = Input(Bool())
       }
       val walkVType = Flipped(Valid(new VType))
+      val isResumeMType = Input(Bool())
+      val walkToArchMType = Input(Bool())
+      val commitMType = new Bundle {
+        val mtype = Flipped(Valid(new MType))
+        val hasMsetml = Input(Bool())
+      }
+      val walkMType = Flipped(Valid(new MType))
     }
     val stallReason = new Bundle {
       val in = Flipped(new StallReasonIO(DecodeWidth))
@@ -73,6 +81,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     }
     val vsetvlVType = Input(VType())
     val vstart = Input(Vl())
+    val msetmlMType = Input(MType())
 
     val toCSR = new Bundle {
       val trapInstInfo = ValidIO(new TrapInstInfo)
@@ -91,6 +100,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   val decoderComp = Module(new DecodeUnitComp)
   val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))
   val vtypeGen = Module(new VTypeGen)
+  val mtypeGen = Module(new MTypeGen)
 
   val debug_globalCounter = RegInit(0.U(XLEN.W))
 
@@ -102,6 +112,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   decoders.foreach { case dst => dst.io.fromCSR := io.fromCSR }
   decoders.foreach { case dst => dst.io.enq.vtype := vtypeGen.io.vtype }
   decoders.foreach { case dst => dst.io.enq.vstart := io.vstart }
+  decoders.foreach { case dst => dst.io.enq.mtype := mtypeGen.io.mtype }
   val isComplexVec = VecInit(inValids.zip(decoders.map(_.io.deq.isComplex)).map { case (valid, isComplex) => valid && isComplex })
   val isSimpleVec = VecInit(inValids.zip(decoders.map(_.io.deq.isComplex)).map { case (valid, isComplex) => valid && !isComplex })
   val simpleDecodedInst = VecInit(decoders.map(_.io.deq.decodedInst))
@@ -132,10 +143,22 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   vtypeGen.io.walkVType := io.fromRob.walkVType
   vtypeGen.io.vsetvlVType := io.vsetvlVType
 
+  mtypeGen.io.insts.zipWithIndex.foreach { case (inst, i) =>
+    inst.valid := io.in(i).valid
+    inst.bits := io.in(i).bits.instr
+  }
+  // when io.redirect is True, never update mtype
+  mtypeGen.io.canUpdateMType := decoderComp.io.in.fire && decoderComp.io.in.bits.simpleDecodedInst.isMset && !io.redirect
+  mtypeGen.io.walkToArchMType := io.fromRob.walkToArchMType
+  mtypeGen.io.commitMType := io.fromRob.commitMType
+  mtypeGen.io.walkMType := io.fromRob.walkMType
+  mtypeGen.io.msetmlMType := io.msetmlMType
+
   //Comp 1
   decoderComp.io.redirect := io.redirect
   decoderComp.io.csrCtrl := io.csrCtrl
   decoderComp.io.vtypeBypass := vtypeGen.io.vtype
+  decoderComp.io.mtypeBypass := mtypeGen.io.mtype
   // The input inst of decoderComp is latched last cycle.
   // Set input empty, if there is no complex inst latched last cycle.
   decoderComp.io.in.valid := complexValid && !io.fromRob.isResumeVType
@@ -154,6 +177,9 @@ class DecodeStage(implicit p: Parameters) extends XSModule
 
   // block vector inst when vtype is resuming
   val hasVectorInst = VecInit(decoders.map(x => FuType.FuTypeOrR(x.io.deq.decodedInst.fuType, FuType.vecArithOrMem ++ FuType.vecVSET))).asUInt.orR
+  // TODO: hasVectorInst isn't actually used, so can we remove it?
+  //       The same goes for hasMatrixInst.
+  val hasMatrixInst = false.B
 
   canAccept := !io.redirect && (io.out.head.ready || decoderComp.io.in.ready) && !io.fromRob.isResumeVType
 
@@ -222,6 +248,8 @@ class DecodeStage(implicit p: Parameters) extends XSModule
 
     io.vlRat(i).addr := Vl_IDX.U // vl
     io.vlRat(i).hold := !io.out(i).ready
+
+    // TODO: implement the logic for matrix instructions here
   }
 
   val hasValid = VecInit(io.in.map(_.valid)).asUInt.orR
