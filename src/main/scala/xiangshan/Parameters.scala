@@ -180,6 +180,7 @@ case class XSCoreParameters
   RobSize: Int = 160,
   RabSize: Int = 256,
   VTypeBufferSize: Int = 64, // used to reorder vtype
+  MTypeBufferSize: Int = 64, // So, mtype also needs a buffer?
   IssueQueueSize: Int = 24,
   IssueQueueCompEntrySize: Int = 16,
   dpParams: DispatchParameters = DispatchParameters(

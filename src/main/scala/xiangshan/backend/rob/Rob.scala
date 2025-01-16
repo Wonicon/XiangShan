@@ -41,6 +41,7 @@ import xiangshan.frontend.FtqPtr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfo, LsTopdownInfo}
+import xiangshan.backend.fu.matrix.Bundles.MType
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.SnapshotGenerator
 import yunsuan.VfaluType
@@ -96,6 +97,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         val vtype = ValidIO(VType())
         val hasVsetvl = Output(Bool())
       }
+      val commitMType = new Bundle {
+        val mtype = ValidIO(MType())
+      }
     }
     val fromVecExcpMod = Input(new Bundle {
       val busy = Bool()
@@ -106,7 +110,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     })
     val readGPAMemData = Input(new GPAMemEntry)
     val vstartIsZero = Input(Bool())
-
+    val mstartIsZero = Input(Bool())
     val toVecExcpMod = Output(new Bundle {
       val logicPhyRegMap = Vec(RabCommitWidth, ValidIO(new RegWriteFromRab))
       val excpInfo = ValidIO(new VecExcpInfo)
