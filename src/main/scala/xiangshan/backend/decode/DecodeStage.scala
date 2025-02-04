@@ -71,7 +71,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
       val walkToArchMType = Input(Bool())
       val commitMType = new Bundle {
         val mtype = Flipped(Valid(new MType))
-        val hasMsetml = Input(Bool())
+        val hasMsettype = Input(Bool())
       }
       val walkMType = Flipped(Valid(new MType))
     }
@@ -81,7 +81,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     }
     val vsetvlVType = Input(VType())
     val vstart = Input(Vl())
-    val msetMType = Input(MType())
+    val msettypeMType = Input(MType())
     val mstart = Input(Vl()) // FIXME: don't use Vl here
 
     val toCSR = new Bundle {
@@ -114,6 +114,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   decoders.foreach { case dst => dst.io.enq.vtype := vtypeGen.io.vtype }
   decoders.foreach { case dst => dst.io.enq.vstart := io.vstart }
   decoders.foreach { case dst => dst.io.enq.mtype := mtypeGen.io.mtype }
+  // decoders.foreach { case dst => dst.io.enq.mstart := io.mstart }
   val isComplexVec = VecInit(inValids.zip(decoders.map(_.io.deq.isComplex)).map { case (valid, isComplex) => valid && isComplex })
   val isSimpleVec = VecInit(inValids.zip(decoders.map(_.io.deq.isComplex)).map { case (valid, isComplex) => valid && !isComplex })
   val simpleDecodedInst = VecInit(decoders.map(_.io.deq.decodedInst))
@@ -153,7 +154,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   mtypeGen.io.walkToArchMType := io.fromRob.walkToArchMType
   mtypeGen.io.commitMType := io.fromRob.commitMType
   mtypeGen.io.walkMType := io.fromRob.walkMType
-  mtypeGen.io.msetmlMType := io.msetMType
+  mtypeGen.io.msettypeMType := io.msettypeMType
 
   //Comp 1
   decoderComp.io.redirect := io.redirect

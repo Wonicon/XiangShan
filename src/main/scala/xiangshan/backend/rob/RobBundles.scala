@@ -59,6 +59,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val ftqOffset = UInt(log2Up(PredictWidth).W)
     val isRVC = Bool()
     val isVset = Bool()
+    val isMset = Bool()
     val isHls = Bool()
     val instrSize = UInt(log2Ceil(RenameWidth + 1).W)
     // data end
@@ -101,6 +102,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val vxsat = Bool()
     val isRVC = Bool()
     val isVset = Bool()
+    val isMset = Bool()
     val isHls = Bool()
     val isVls = Bool()
     val vls = Bool()
@@ -132,6 +134,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.ftqOffset := robEnq.ftqOffset
     robEntry.isRVC := robEnq.preDecodeInfo.isRVC
     robEntry.isVset := robEnq.isVset
+    robEntry.isMset := robEnq.isMset
     robEntry.isHls := robEnq.isHls
     robEntry.instrSize := robEnq.instrSize
     robEntry.rfWen := robEnq.rfWen
@@ -161,6 +164,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.vxsat := robEntry.vxsat
     robCommitEntry.isRVC := robEntry.isRVC
     robCommitEntry.isVset := robEntry.isVset
+    robCommitEntry.isMset := robEntry.isMset
     robCommitEntry.isHls := robEntry.isHls
     robCommitEntry.isVls := robEntry.vls
     robCommitEntry.vls := robEntry.vls
@@ -287,6 +291,7 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   val isFetchMalAddr = Bool()
   val flushPipe = Bool()
   val isVset = Bool()
+  val isMset = Bool()
   val replayInst = Bool() // redirect to that inst itself
   val singleStep = Bool() // TODO add frontend hit beneath
   val crossPageIPFFix = Bool()
