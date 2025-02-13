@@ -424,6 +424,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     io.allocPregs(i).isVec := io.fromRename(i).valid && io.fromRename(i).bits.vecWen
     io.allocPregs(i).isV0 := io.fromRename(i).valid && io.fromRename(i).bits.v0Wen
     io.allocPregs(i).isVl := io.fromRename(i).valid && io.fromRename(i).bits.vlWen
+    io.allocPregs(i).isMtilex := io.fromRename(i).valid && io.fromRename(i).bits.mtilexWen
     io.allocPregs(i).preg  := io.fromRename(i).bits.pdest
   }
   val renameFireCnt = PopCount(io.fromRename.map(_.fire))

@@ -76,6 +76,7 @@ object OthersEntry {
         if (iqParams.isVecMemIQ) new OthersEntryVecMem(isComp)
         else new OthersEntry(isComp)
       case VfScheduler() => new OthersEntry(isComp)
+      case MfScheduler() => new OthersEntry(isComp)
       case _ => null
     }
   }

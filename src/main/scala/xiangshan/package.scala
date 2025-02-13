@@ -963,6 +963,8 @@ package object xiangshan {
     def AMO_CAS_W        = "b110101".U // amocas_w
     def AMO_CAS_D        = "b110110".U // amocas_d
     def AMO_CAS_Q        = "b110111".U // amocas_q
+
+    def MSET             = "b111110".U // mset
     // dummy means that the instruction is a complex instruction but uop number is 1
     def dummy     = "b111111".U
 
@@ -1124,6 +1126,7 @@ package object xiangshan {
     val VecFlStall = Value("VecFlStall")
     val V0FlStall = Value("V0FlStall")
     val VlFlStall = Value("VlFlStall")
+    val MtilexFlStall = Value("MtilexFlStall")
     val MultiFlStall = Value("MultiFlStall")
     // dispatch queue full
     val IntDqStall = Value("IntDqStall")

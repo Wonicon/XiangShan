@@ -172,6 +172,7 @@ object EnqEntry {
         if (iqParams.isVecMemIQ) new EnqEntryVecMem(isComp)
         else new EnqEntry(isComp)
       case VfScheduler() => new EnqEntry(isComp)
+      case MfScheduler() => new EnqEntry(isComp)
       case _ => null
     }
   }
