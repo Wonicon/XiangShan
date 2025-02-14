@@ -247,13 +247,13 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   wbFuBusyTable.io.in.intSchdBusyTable := intScheduler.io.wbFuBusyTable
   wbFuBusyTable.io.in.fpSchdBusyTable := fpScheduler.io.wbFuBusyTable
   wbFuBusyTable.io.in.vfSchdBusyTable := vfScheduler.io.wbFuBusyTable
-  wbFuBusyTable.io.in.memSchdBusyTable := memScheduler.io.wbFuBusyTable
   wbFuBusyTable.io.in.mfSchdBusyTable := mfScheduler.io.wbFuBusyTable
+  wbFuBusyTable.io.in.memSchdBusyTable := memScheduler.io.wbFuBusyTable
   intScheduler.io.fromWbFuBusyTable.fuBusyTableRead := wbFuBusyTable.io.out.intRespRead
   fpScheduler.io.fromWbFuBusyTable.fuBusyTableRead := wbFuBusyTable.io.out.fpRespRead
   vfScheduler.io.fromWbFuBusyTable.fuBusyTableRead := wbFuBusyTable.io.out.vfRespRead
-  memScheduler.io.fromWbFuBusyTable.fuBusyTableRead := wbFuBusyTable.io.out.memRespRead
   mfScheduler.io.fromWbFuBusyTable.fuBusyTableRead := wbFuBusyTable.io.out.mfRespRead
+  memScheduler.io.fromWbFuBusyTable.fuBusyTableRead := wbFuBusyTable.io.out.memRespRead
   dataPath.io.wbConfictRead := wbFuBusyTable.io.out.wbConflictRead
 
   private val og1Cancel = dataPath.io.og1Cancel
@@ -290,6 +290,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.toDispatch.wakeUpInt := intScheduler.io.toSchedulers.wakeupVec
   ctrlBlock.io.toDispatch.wakeUpFp  := fpScheduler.io.toSchedulers.wakeupVec
   ctrlBlock.io.toDispatch.wakeUpVec := vfScheduler.io.toSchedulers.wakeupVec
+  ctrlBlock.io.toDispatch.wakeUpMatrix := mfScheduler.io.toSchedulers.wakeupVec
   ctrlBlock.io.toDispatch.wakeUpMem := memScheduler.io.toSchedulers.wakeupVec
   ctrlBlock.io.toDispatch.IQValidNumVec := intScheduler.io.IQValidNumVec ++ fpScheduler.io.IQValidNumVec ++ vfScheduler.io.IQValidNumVec ++ mfScheduler.io.IQValidNumVec ++ memScheduler.io.IQValidNumVec
   ctrlBlock.io.toDispatch.ldCancel := io.mem.ldCancel
@@ -522,7 +523,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   mfScheduler.io.fromTop.hartId := io.fromTop.hartId
   mfScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
   mfScheduler.io.fromDispatch.uops <> ctrlBlock.io.toIssueBlock.mfUops
-  mfScheduler.io.intWriteBack := wbDataPath.io.toIntPreg
+  // mfScheduler.io.intWriteBack := wbDataPath.io.toIntPreg
+  mfScheduler.io.intWriteBack := 0.U.asTypeOf(mfScheduler.io.intWriteBack)
   mfScheduler.io.fpWriteBack := 0.U.asTypeOf(mfScheduler.io.fpWriteBack)
   mfScheduler.io.vfWriteBack := 0.U.asTypeOf(mfScheduler.io.vfWriteBack)
   mfScheduler.io.v0WriteBack := 0.U.asTypeOf(mfScheduler.io.v0WriteBack)
@@ -593,6 +595,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   bypassNetwork.io.fromDataPath.int <> dataPath.io.toIntExu
   bypassNetwork.io.fromDataPath.fp <> dataPath.io.toFpExu
   bypassNetwork.io.fromDataPath.vf <> og2ForVector.io.toVfArithExu
+  bypassNetwork.io.fromDataPath.mf <> dataPath.io.toMfExu
   bypassNetwork.io.fromDataPath.mem.lazyZip(params.memSchdParams.get.issueBlockParams).lazyZip(dataPath.io.toMemExu).filterNot(_._2.needOg2Resp)
     .map(x => (x._1, x._3)).foreach {
       case (bypassMem, datapathMem) => bypassMem <> datapathMem
@@ -670,7 +673,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   val vtype = VType.toVtypeStruct(Mux(hasVsetvl, vsetvlVType, commitVType.bits)).asUInt
 
   val fromIntExuMsetMType = intExuBlock.io.mtype.getOrElse(0.U.asTypeOf((Valid(new MType))))
-  val fromMfExuMsetMType = vfExuBlock.io.mtype.getOrElse(0.U.asTypeOf((Valid(new MType))))
+  val fromMfExuMsetMType = mfExuBlock.io.mtype.getOrElse(0.U.asTypeOf((Valid(new MType))))
   val fromMsetMType = Mux(fromIntExuMsetMType.valid, fromIntExuMsetMType.bits, fromMfExuMsetMType.bits)
   val msettypeMType = RegEnable(fromMsetMType, 0.U.asTypeOf(new MType), fromIntExuMsetMType.valid || fromMfExuMsetMType.valid)
   ctrlBlock.io.toDecode.msettypeMType := msettypeMType
@@ -746,6 +749,22 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     }
   }
 
+  mfExuBlock.io.flush := ctrlBlock.io.toExuBlock.flush
+  for (i <- 0 until mfExuBlock.io.in.size) {
+    for (j <- 0 until mfExuBlock.io.in(i).size) {
+      val shouldLdCancel = LoadShouldCancel(bypassNetwork.io.toExus.mf(i)(j).bits.loadDependency, io.mem.ldCancel)
+      NewPipelineConnect(
+        bypassNetwork.io.toExus.mf(i)(j), mfExuBlock.io.in(i)(j), mfExuBlock.io.in(i)(j).fire,
+        Mux(
+          bypassNetwork.io.toExus.mf(i)(j).fire,
+          bypassNetwork.io.toExus.mf(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush) || shouldLdCancel,
+          mfExuBlock.io.in(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush)
+        ),
+        Option("bypassNetwork2mfExuBlock")
+      )
+    }
+  }
+
   intExuBlock.io.frm.foreach(_ := csrio.fpu.frm)
   fpExuBlock.io.frm.foreach(_ := csrio.fpu.frm)
   fpExuBlock.io.vxrm.foreach(_ := csrio.vpu.vxrm)
@@ -757,6 +776,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   wbDataPath.io.fromIntExu <> intExuBlock.io.out
   wbDataPath.io.fromFpExu <> fpExuBlock.io.out
   wbDataPath.io.fromVfExu <> vfExuBlock.io.out
+  wbDataPath.io.fromMfExu <> mfExuBlock.io.out
   wbDataPath.io.fromMemExu.flatten.zip(io.mem.writeBack).foreach { case (sink, source) =>
     sink.valid := source.valid
     source.ready := sink.ready
@@ -969,6 +989,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
       ModuleNode(intExuBlock),
       ModuleNode(fpExuBlock),
       ModuleNode(vfExuBlock),
+      ModuleNode(mfExuBlock),
       ModuleNode(bypassNetwork),
       ModuleNode(wbDataPath)
     ))
@@ -976,6 +997,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
       ModuleNode(intScheduler),
       ModuleNode(fpScheduler),
       ModuleNode(vfScheduler),
+      ModuleNode(mfScheduler),
       ModuleNode(memScheduler),
       ModuleNode(og2ForVector),
       ModuleNode(wbFuBusyTable),
@@ -1001,11 +1023,12 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   val intSchedulerPerf = intScheduler.asInstanceOf[SchedulerArithImp].getPerfEvents
   val fpSchedulerPerf  = fpScheduler.asInstanceOf[SchedulerArithImp].getPerfEvents
   val vecSchedulerPerf = vfScheduler.asInstanceOf[SchedulerArithImp].getPerfEvents
+  val mfSchedulerPerf = mfScheduler.asInstanceOf[SchedulerArithImp].getPerfEvents
   val memSchedulerPerf = memScheduler.asInstanceOf[SchedulerMemImp].getPerfEvents
 
   val perfBackend  = Seq()
   // let index = 0 be no event
-  val allPerfEvents = Seq(("noEvent", 0.U)) ++ ctrlBlockPerf ++ intSchedulerPerf ++ fpSchedulerPerf ++ vecSchedulerPerf ++ memSchedulerPerf ++ perfBackend
+  val allPerfEvents = Seq(("noEvent", 0.U)) ++ ctrlBlockPerf ++ intSchedulerPerf ++ fpSchedulerPerf ++ vecSchedulerPerf ++ mfSchedulerPerf ++ memSchedulerPerf ++ perfBackend
 
 
   if (printEventCoding) {
