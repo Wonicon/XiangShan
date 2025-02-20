@@ -181,9 +181,6 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     common.flushed            := status.robIdx.needFlush(commonIn.flush)
     common.deqSuccess         := (if (params.isVecMemIQ) status.issued else true.B) &&
       commonIn.issueResp.valid && RespType.succeed(commonIn.issueResp.bits.resp) && !common.srcLoadCancelVec.asUInt.orR
-    // print the size of srcWakeupByWB
-    println(s"srcWakeupByWB size: ${common.srcWakeupByWB.size}")
-    println(s"wakeUpFromWB: ${commonIn.wakeUpFromWB}")
     common.srcWakeupByWB      := commonIn.wakeUpFromWB.map{ bundle => 
                                     val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
                                     if (params.numRegSrc == 5) {

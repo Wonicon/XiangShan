@@ -271,6 +271,7 @@ class ExeUnitImp(
       sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFpToVecInst := 0.U)
       sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFP32Instr   := 0.U)
       sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFP64Instr   := 0.U)
+      sink.bits.ctrl.mpu         .foreach(x => x := source.bits.mpu.get)
       sink.bits.perfDebugInfo    := source.bits.perfDebugInfo
   }
   funcUnits.filter(_.cfg.latency.latencyVal.nonEmpty).map{ fu =>
@@ -298,6 +299,7 @@ class ExeUnitImp(
       sink.vpu.foreach(x => x.fpu.isFpToVecInst := 0.U)
       sink.vpu.foreach(x => x.fpu.isFP32Instr := 0.U)
       sink.vpu.foreach(x => x.fpu.isFP64Instr := 0.U)
+      sink.mpu.foreach(x => x := source.mpu.get)
       val sinkData = fu.io.in.bits.dataPipe.get(i)
       val sourceData = inPipe._1(i)
       sinkData.src.zip(sourceData.src).foreach { case (fuSrc, exuSrc) => fuSrc := exuSrc }
@@ -411,6 +413,7 @@ class ExeUnitImp(
   io.vxrm.foreach(exuio => funcUnits.foreach(fu => fu.io.vxrm.foreach(fuio => fuio <> exuio)))
   io.vlIsZero.foreach(exuio => funcUnits.foreach(fu => fu.io.vlIsZero.foreach(fuio => exuio := fuio)))
   io.vlIsVlmax.foreach(exuio => funcUnits.foreach(fu => fu.io.vlIsVlmax.foreach(fuio => exuio := fuio)))
+  io.mtype.foreach(exuio => funcUnits.foreach(fu => fu.io.mtype.foreach(fuio => exuio := fuio)))
   io.mtilexIsZero.foreach(exuio => funcUnits.foreach(fu => fu.io.mtilexIsZero.foreach(fuio => exuio := fuio)))
   io.mtilexIsMtilexmax.foreach(exuio => funcUnits.foreach(fu => fu.io.mtilexIsMtilexmax.foreach(fuio => exuio := fuio)))
   io.instrAddrTransType.foreach(exuio => funcUnits.foreach(fu => fu.io.instrAddrTransType.foreach(fuio => fuio := exuio)))
