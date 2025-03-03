@@ -47,6 +47,17 @@ trait HasCSRConst {
   val Vtype         = 0xC21
   val Vlenb         = 0xC22
 
+  // Matrix Extension CSRs
+  val mtype         = 0xC40
+  val mtilem        = 0xC41
+  val mtilen        = 0xC42
+  val mtilek        = 0xC43
+  val mlenb         = 0xC44
+  val mrlenb        = 0xC45
+  val mamul         = 0xC46
+  val mstart        = 0x040
+  val mcsr          = 0x041
+
   // User Counter/Timers
   val Cycle         = 0xC00
   val Time          = 0xC01

@@ -24,7 +24,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.rename.RatReadPort
 import xiangshan.backend.Bundles._
-import xiangshan.backend.fu.matrix.Bundles.{MType}
+import xiangshan.backend.fu.matrix.Bundles.{MType, Mtilex}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.wrapper.CSRToDecode
@@ -83,7 +83,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     val vsetvlVType = Input(VType())
     val vstart = Input(Vl())
     val msettypeMType = Input(MType())
-    val mstart = Input(Vl()) // FIXME: don't use Vl here
+    val mstart = Input(Mtilex()) // FIXME: don't use Mtilex here
 
     val toCSR = new Bundle {
       val trapInstInfo = ValidIO(new TrapInstInfo)
@@ -115,7 +115,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   decoders.foreach { case dst => dst.io.enq.vtype := vtypeGen.io.vtype }
   decoders.foreach { case dst => dst.io.enq.vstart := io.vstart }
   decoders.foreach { case dst => dst.io.enq.mtype := mtypeGen.io.mtype }
-  // decoders.foreach { case dst => dst.io.enq.mstart := io.mstart }
+  decoders.foreach { case dst => dst.io.enq.mstart := io.mstart }
   val isComplexVec = VecInit(inValids.zip(decoders.map(_.io.deq.isComplex)).map { case (valid, isComplex) => valid && isComplex })
   val isSimpleVec = VecInit(inValids.zip(decoders.map(_.io.deq.isComplex)).map { case (valid, isComplex) => valid && !isComplex })
   val simpleDecodedInst = VecInit(decoders.map(_.io.deq.decodedInst))
@@ -184,7 +184,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   //       The same goes for hasMatrixInst.
   val hasMatrixInst = false.B
 
-  canAccept := !io.redirect && (io.out.head.ready || decoderComp.io.in.ready) && !io.fromRob.isResumeVType
+  canAccept := !io.redirect && (io.out.head.ready || decoderComp.io.in.ready) && !io.fromRob.isResumeVType && !io.fromRob.isResumeMType
 
   io.canAccept := canAccept
 
@@ -192,7 +192,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     in.ready := !io.redirect && (
       simplePrefixVec(i) && (i.U +& complexNum) < readyCounter ||
       firstComplexOH(i) && (i.U +& complexNum) <= readyCounter && decoderComp.io.in.ready
-    ) && !io.fromRob.isResumeVType
+    ) && !io.fromRob.isResumeVType && !io.fromRob.isResumeMType
   }
 
   val finalDecodedInst = Wire(Vec(DecodeWidth, new DecodedInst))
@@ -204,7 +204,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   }
 
   io.out.zipWithIndex.foreach { case (inst, i) =>
-    inst.valid := finalDecodedInstValid(i) && !io.fromRob.isResumeVType
+    inst.valid := finalDecodedInstValid(i) && !io.fromRob.isResumeVType && !io.fromRob.isResumeMType
     inst.bits := finalDecodedInst(i)
     inst.bits.lsrc(0) := Mux(finalDecodedInst(i).vpu.isReverse, finalDecodedInst(i).lsrc(1), finalDecodedInst(i).lsrc(0))
     inst.bits.lsrc(1) := Mux(finalDecodedInst(i).vpu.isReverse, finalDecodedInst(i).lsrc(0), finalDecodedInst(i).lsrc(1))

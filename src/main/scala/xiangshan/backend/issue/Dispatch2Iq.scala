@@ -880,6 +880,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   private val sew             = vtype.map(_.vsew)
   private val lmul            = vtype.map(_.vlmul)
   private val eew             = uop.map(_.vpu.veew)
+  private val mtype           = uop.map(_.mpu.mtype)
   private val mop             = fuOpType.map(fuOpTypeItem => LSUOpType.getVecLSMop(fuOpTypeItem))
   private val nf              = fuOpType.zip(uop.map(_.vpu.nf)).map{ case (fuOpTypeItem, nfItem) => Mux(LSUOpType.isWhole(fuOpTypeItem), 0.U, nfItem) }
   private val emul            = fuOpType.zipWithIndex.map { case (fuOpTypeItem, index) =>

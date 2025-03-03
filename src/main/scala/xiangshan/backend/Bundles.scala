@@ -543,6 +543,8 @@ object Bundles {
     val specMint4    = Bool()
     val specMsew     = MSew()
 
+    val mstart   = Mtilex()
+
     def mtype: MType = {
       val res = Wire(MType())
       res.illegal := this.mill
