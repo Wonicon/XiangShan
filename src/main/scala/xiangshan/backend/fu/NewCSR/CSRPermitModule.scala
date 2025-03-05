@@ -66,20 +66,13 @@ class CSRPermitModule extends Module {
     henvcfg(63),
   )
 
-  // private val (sFSIsOff, sVSIsOff, sMSIsOff, sOrVsFSIsOff, sOrVsVSIsOff, sOrMsMSIsOff) = (
-  //   io.in.status.mstatusFSOff,
-  //   io.in.status.mstatusVSOff,
-  //   io.in.status.mstatusMSOff,
-  //   io.in.status.mstatusFSOff || io.in.status.vsstatusFSOff,
-  //   io.in.status.mstatusVSOff || io.in.status.vsstatusVSOff,
-  //   io.in.status.mstatusMSOff || io.in.status.vsstatusMSOff,
-  // )
-
-  private val (sFSIsOff, sVSIsOff, sOrVsFSIsOff, sOrVsVSIsOff) = (
+  private val (sFSIsOff, sVSIsOff, sMSIsOff, sOrVsFSIsOff, sOrVsVSIsOff, sOrVsMSIsOff) = (
     io.in.status.mstatusFSOff,
     io.in.status.mstatusVSOff,
+    io.in.status.mstatusMSOff,
     io.in.status.mstatusFSOff || io.in.status.vsstatusFSOff,
     io.in.status.mstatusVSOff || io.in.status.vsstatusVSOff,
+    io.in.status.mstatusMSOff || io.in.status.vsstatusMSOff,
   )
 
   private val (miselectIsIllegal, siselectIsIllegal, vsiselectIsIllegal) = (
@@ -105,8 +98,8 @@ class CSRPermitModule extends Module {
   private val csrIsFp = Seq(CSRs.fflags, CSRs.frm, CSRs.fcsr).map(_.U === addr).reduce(_ || _)
   private val csrIsVec = Seq(CSRs.vstart, CSRs.vxsat, CSRs.vxrm, CSRs.vcsr, CSRs.vtype).map(_.U === addr).reduce(_ || _)
   private val csrIsWritableVec = Seq(CSRs.vstart, CSRs.vxsat, CSRs.vxrm, CSRs.vcsr).map(_.U === addr).reduce(_ || _)
-  // private val csrIsMatrix = Seq(CSRs.mstart, CSRs.mtype, CSRs.mcsr).map(_.U === addr).reduce(_ || _)
-  // private val csrIsWritableMatrix = Seq(CSRs.mstart, CSRs.mcsr).map(_.U === addr).reduce(_ || _)
+  private val csrIsMatrix = Seq(CSRs.mstart, CSRs.mtype, CSRs.mcsr).map(_.U === addr).reduce(_ || _)
+  private val csrIsWritableMatrix = Seq(CSRs.mstart, CSRs.mcsr).map(_.U === addr).reduce(_ || _)
   private val counterAddr = addr(4, 0) // 32 counters
 
   private val accessTable = TruthTable(Seq(
@@ -247,13 +240,13 @@ class CSRPermitModule extends Module {
 
   private val fsEffectiveOff = sFSIsOff && !privState.isVirtual || sOrVsFSIsOff && privState.isVirtual
   private val vsEffectiveOff = sVSIsOff && !privState.isVirtual || sOrVsVSIsOff && privState.isVirtual
-  // private val msEffectiveOff = sMSIsOff && !privState.isVirtual || sOrMsMSIsOff && privState.isVirtual
+  private val msEffectiveOff = sMSIsOff && !privState.isVirtual || sOrVsMSIsOff && privState.isVirtual
 
   private val fpOff_EX_II  = csrAccess && csrIsFp  && fsEffectiveOff
   private val vecOff_EX_II = csrAccess && csrIsVec && vsEffectiveOff
-  // private val matrixOff_EX_II = csrAccess && csrIsMatrix && msEffectiveOff
+  private val matrixOff_EX_II = csrAccess && csrIsMatrix && msEffectiveOff
 
-  private val fpVec_EX_II = fpOff_EX_II || vecOff_EX_II
+  private val fpVecMatrix_EX_II = fpOff_EX_II || vecOff_EX_II || matrixOff_EX_II
 
   /**
    * AIA begin
@@ -278,7 +271,7 @@ class CSRPermitModule extends Module {
   // Todo: check correct
   io.out.EX_II :=  csrAccess && !privilegeLegal && (!privState.isVirtual || privState.isVirtual && csrIsM) ||
     rwIllegal || mnret_EX_II || mret_EX_II || sret_EX_II || rwSatp_EX_II || accessHPM_EX_II ||
-    rwStimecmp_EX_II || fpVec_EX_II || dret_EX_II || xstateControlAccess_EX_II || rwStopei_EX_II ||
+    rwStimecmp_EX_II || fpVecMatrix_EX_II || dret_EX_II || xstateControlAccess_EX_II || rwStopei_EX_II ||
     rwMireg_EX_II || rwSireg_EX_II || rwVSireg_EX_II
   io.out.EX_VI := (csrAccess && !privilegeLegal && privState.isVirtual && !csrIsM ||
     mnret_EX_VI || mret_EX_VI || sret_EX_VI || rwSatp_EX_VI || accessHPM_EX_VI || rwStimecmp_EX_VI || rwSireg_EX_VI || rwSip_Sie_EX_VI) && !rwIllegal || xstateControlAccess_EX_VI
@@ -291,7 +284,7 @@ class CSRPermitModule extends Module {
 
   io.out.hasLegalWriteFcsr := wen && csrIsFp && !fsEffectiveOff
   io.out.hasLegalWriteVcsr := wen && csrIsWritableVec && !vsEffectiveOff
-  // io.out.hasLegalWriteMcsr := wen && csrIsWritableMatrix && !vsEffectiveOff
+  io.out.hasLegalWriteMcsr := wen && csrIsWritableMatrix && !vsEffectiveOff
 
   dontTouch(regularPrivilegeLegal)
 }
@@ -339,8 +332,8 @@ class CSRPermitIO extends Bundle {
       val vsstatusFSOff = Bool()
       val mstatusVSOff = Bool()
       val vsstatusVSOff = Bool()
-      // val mstatusMSOff = Bool()
-      // val vsstatusMSOff = Bool()
+      val mstatusMSOff = Bool()
+      val vsstatusMSOff = Bool()
       // Sm/Ssstateen: to control state access
       val mstateen0 = new MstateenBundle0
       val hstateen0 = new HstateenBundle0
@@ -365,7 +358,7 @@ class CSRPermitIO extends Bundle {
     val hasLegalDret  = Bool()
     val hasLegalWriteFcsr = Bool()
     val hasLegalWriteVcsr = Bool()
-    // val hasLegalWriteMcsr = Bool()
+    val hasLegalWriteMcsr = Bool()
     val EX_II = Bool()
     val EX_VI = Bool()
   })
