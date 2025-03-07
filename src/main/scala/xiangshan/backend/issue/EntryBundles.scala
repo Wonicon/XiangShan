@@ -181,6 +181,9 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     common.flushed            := status.robIdx.needFlush(commonIn.flush)
     common.deqSuccess         := (if (params.isVecMemIQ) status.issued else true.B) &&
       commonIn.issueResp.valid && RespType.succeed(commonIn.issueResp.bits.resp) && !common.srcLoadCancelVec.asUInt.orR
+
+    // debug: print size of common.srcWakeupByWB and commonIn.wakeUpFromWB
+    println(s"common.srcWakeupByWB size: ${common.srcWakeupByWB.size}, commonIn.wakeUpFromWB size: ${commonIn.wakeUpFromWB.size}")
     common.srcWakeupByWB      := commonIn.wakeUpFromWB.map{ bundle => 
                                     val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
                                     if (params.numRegSrc == 5) {
@@ -226,20 +229,16 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       common.vlWakeupByVfWb   := false.B
     }
 
-    if (params.numRegSrc == 4) {
-      // // only when numRegSrc == 4 need mtilex
-      // val wakeUpFromMtilex = VecInit(commonIn.wakeUpFromWB.map{ bundle => 
-      //   val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
-      //   bundle.bits.wakeUpMtilex(psrcSrcTypeVec(3), bundle.valid)
-      // })
-      // var numMtilexWb = params.backendParam.getMtilexWBExeGroup.size
-      // var intSchdMtilexWbPort = p(XSCoreParamsKey).intSchdMtilexWbPort
-      // var mfSchdMtilexWbPort = p(XSCoreParamsKey).mfSchdMtilexWbPort
-      // common.mtilexWakeupByIntWb  := wakeUpFromMtilex(numMtilexWb + intSchdMtilexWbPort)
-      // common.mtilexWakeupByMfWb   := wakeUpFromMtilex(numMtilexWb + mfSchdMtilexWbPort)
-      // FIXME: implement wakeup from mtilex
-      common.mtilexWakeupByIntWb  := false.B
-      common.mtilexWakeupByMfWb   := false.B
+    if (params.numMtilexSrc != 0) {
+      val wakeUpFromMtilex = VecInit(commonIn.wakeUpFromWB.map{ bundle => 
+        val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
+        bundle.bits.wakeUpMtilex(psrcSrcTypeVec(0), bundle.valid)
+      })
+      var numMtilexWb = params.backendParam.getMtilexWBExeGroup.size
+      var intSchdMtilexWbPort = p(XSCoreParamsKey).intSchdMtilexWbPort
+      var mfSchdMtilexWbPort = p(XSCoreParamsKey).mfSchdMtilexWbPort
+      common.mtilexWakeupByIntWb  := wakeUpFromMtilex(intSchdMtilexWbPort)
+      common.mtilexWakeupByMfWb   := wakeUpFromMtilex(mfSchdMtilexWbPort)
     } else {
       common.mtilexWakeupByIntWb  := false.B
       common.mtilexWakeupByMfWb   := false.B
