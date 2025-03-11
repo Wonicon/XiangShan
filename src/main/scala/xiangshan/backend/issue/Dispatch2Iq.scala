@@ -307,7 +307,7 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
           SrcType.isFp(srcType) -> fpState,
           SrcType.isVp(srcType) -> vfState,
           SrcType.isV0(srcType) -> vfState,
-          SrcType.isMp(srcType) -> mtilexState,
+          SrcType.isMtilex(srcType) -> mtilexState,
           SrcType.isNotReg(srcType) -> true.B,
         ))
     }
@@ -327,7 +327,7 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
           ldp := fpLdq
         }.elsewhen(SrcType.isVp(srcType) || SrcType.isV0(srcType)) {
           ldp := vfLdp
-        }.elsewhen(SrcType.isMp(srcType)) {
+        }.elsewhen(SrcType.isMtilex(srcType)) {
           ldp := mtilexLdp
         }.otherwise {
           ldp := 0.U.asTypeOf(ldp)
