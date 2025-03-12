@@ -26,7 +26,7 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
   val vecWen      = OptionWrapper(cfg.needVecWen, Bool())
   val v0Wen       = OptionWrapper(cfg.needV0Wen, Bool())
   val vlWen       = OptionWrapper(cfg.needVlWen, Bool())
-  val mtilexWen   = OptionWrapper(cfg.needMtilexWen, Bool())
+  val mxWen       = OptionWrapper(cfg.needMxWen, Bool())
   val flushPipe   = OptionWrapper(cfg.flushPipe,  Bool())
   val preDecode   = OptionWrapper(cfg.hasPredecode, new PreDecodeInfo)
   val ftqIdx      = OptionWrapper(cfg.needPc || cfg.replayInst || cfg.isSta || cfg.isCsr, new FtqPtr)
@@ -48,7 +48,7 @@ class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
   val vecWen        = OptionWrapper(cfg.needVecWen, Bool())
   val v0Wen         = OptionWrapper(cfg.needV0Wen, Bool())
   val vlWen         = OptionWrapper(cfg.needVlWen, Bool())
-  val mtilexWen     = OptionWrapper(cfg.needMtilexWen, Bool())
+  val mxWen         = OptionWrapper(cfg.needMxWen, Bool())
   val exceptionVec  = OptionWrapper(cfg.exceptionOut.nonEmpty, ExceptionVec())
   val flushPipe     = OptionWrapper(cfg.flushPipe,  Bool())
   val replay        = OptionWrapper(cfg.replayInst, Bool())
@@ -106,9 +106,9 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val vlIsVlmax = OptionWrapper(cfg.writeVlRf, Output(Bool()))
   val instrAddrTransType = Option.when(cfg.isJmp || cfg.isBrh)(Input(new AddrTransType))
   val mtype = OptionWrapper(cfg.writeMType, (Valid(new MType)))
-  val mtilex = OptionWrapper(cfg.writeMtilexRf, (Valid(UInt(XLEN.W))))
-  val mtilexIsZero = OptionWrapper(cfg.writeMtilexRf, Output(Bool()))
-  val mtilexIsMtilexmax = OptionWrapper(cfg.writeMtilexRf, Output(Bool()))
+  val mtilex = OptionWrapper(cfg.writeMxRf, (Valid(UInt(XLEN.W))))
+  val mxIsZero = OptionWrapper(cfg.writeMxRf, Output(Bool()))
+  val mxIsMxmax = OptionWrapper(cfg.writeMxRf, Output(Bool()))
 }
 
 abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSModule with HasCriticalErrors {
@@ -124,11 +124,12 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.ctrl.vecWen .foreach(_ := RegEnable(io.in.bits.ctrl.vecWen.get, io.in.fire))
     io.out.bits.ctrl.v0Wen .foreach(_ := RegEnable(io.in.bits.ctrl.v0Wen.get, io.in.fire))
     io.out.bits.ctrl.vlWen .foreach(_ := RegEnable(io.in.bits.ctrl.vlWen.get, io.in.fire))
-    io.out.bits.ctrl.mtilexWen .foreach(_ := RegEnable(io.in.bits.ctrl.mtilexWen.get, io.in.fire))
+    io.out.bits.ctrl.mxWen .foreach(_ := RegEnable(io.in.bits.ctrl.mxWen.get, io.in.fire))
     // io.out.bits.ctrl.flushPipe should be connected in fu
     io.out.bits.ctrl.preDecode.foreach(_ := RegEnable(io.in.bits.ctrl.preDecode.get, io.in.fire))
     io.out.bits.ctrl.fpu      .foreach(_ := RegEnable(io.in.bits.ctrl.fpu.get, io.in.fire))
     io.out.bits.ctrl.vpu      .foreach(_ := RegEnable(io.in.bits.ctrl.vpu.get, io.in.fire))
+    io.out.bits.ctrl.mpu      .foreach(_ := RegEnable(io.in.bits.ctrl.mpu.get, io.in.fire))
     io.out.bits.perfDebugInfo := RegEnable(io.in.bits.perfDebugInfo, io.in.fire)
   }
 
@@ -140,11 +141,12 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.ctrl.vecWen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.vecWen.get, io.in.fire))
     io.out.bits.ctrl.v0Wen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.v0Wen.get, io.in.fire))
     io.out.bits.ctrl.vlWen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.vlWen.get, io.in.fire))
-    io.out.bits.ctrl.mtilexWen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.mtilexWen.get, io.in.fire))
+    io.out.bits.ctrl.mxWen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.mxWen.get, io.in.fire))
     // io.out.bits.ctrl.flushPipe should be connected in fu
     io.out.bits.ctrl.preDecode.foreach(_ := DataHoldBypass(io.in.bits.ctrl.preDecode.get, io.in.fire))
     io.out.bits.ctrl.fpu.foreach(_ := DataHoldBypass(io.in.bits.ctrl.fpu.get, io.in.fire))
     io.out.bits.ctrl.vpu.foreach(_ := DataHoldBypass(io.in.bits.ctrl.vpu.get, io.in.fire))
+    io.out.bits.ctrl.mpu.foreach(_ := DataHoldBypass(io.in.bits.ctrl.mpu.get, io.in.fire))
     io.out.bits.perfDebugInfo := DataHoldBypass(io.in.bits.perfDebugInfo, io.in.fire)
   }
 
@@ -156,11 +158,12 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.ctrl.vecWen.foreach(_ := io.in.bits.ctrl.vecWen.get)
     io.out.bits.ctrl.v0Wen.foreach(_ := io.in.bits.ctrl.v0Wen.get)
     io.out.bits.ctrl.vlWen.foreach(_ := io.in.bits.ctrl.vlWen.get)
-    io.out.bits.ctrl.mtilexWen.foreach(_ := io.in.bits.ctrl.mtilexWen.get)
+    io.out.bits.ctrl.mxWen.foreach(_ := io.in.bits.ctrl.mxWen.get)
     // io.out.bits.ctrl.flushPipe should be connected in fu
     io.out.bits.ctrl.preDecode.foreach(_ := io.in.bits.ctrl.preDecode.get)
     io.out.bits.ctrl.fpu.foreach(_ := io.in.bits.ctrl.fpu.get)
     io.out.bits.ctrl.vpu.foreach(_ := io.in.bits.ctrl.vpu.get)
+    io.out.bits.ctrl.mpu.foreach(_ := io.in.bits.ctrl.mpu.get)
     io.out.bits.perfDebugInfo := io.in.bits.perfDebugInfo
   }
 }
@@ -245,9 +248,10 @@ trait HasPipelineReg { this: FuncUnit =>
   io.out.bits.ctrl.vecWen.foreach(_ := ctrlVec.last.vecWen.get)
   io.out.bits.ctrl.v0Wen.foreach(_ := ctrlVec.last.v0Wen.get)
   io.out.bits.ctrl.vlWen.foreach(_ := ctrlVec.last.vlWen.get)
-  io.out.bits.ctrl.mtilexWen.foreach(_ := ctrlVec.last.mtilexWen.get)
+  io.out.bits.ctrl.mxWen.foreach(_ := ctrlVec.last.mxWen.get)
   io.out.bits.ctrl.fpu.foreach(_ := ctrlVec.last.fpu.get)
   io.out.bits.ctrl.vpu.foreach(_ := ctrlVec.last.vpu.get)
+  io.out.bits.ctrl.mpu.foreach(_ := ctrlVec.last.mpu.get)
   io.out.bits.perfDebugInfo := fixPerfVec.last
 
   // vstart illegal

@@ -53,7 +53,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     val vecRat = Vec(RenameWidth, Vec(numVecRatPorts, Flipped(new RatReadPort(VecLogicRegs))))
     val v0Rat = Vec(RenameWidth, Flipped(new RatReadPort(V0LogicRegs)))
     val vlRat = Vec(RenameWidth, Flipped(new RatReadPort(VlLogicRegs)))
-    val mtilexRat = Vec(RenameWidth, Flipped(new RatReadPort(MtilexLogicRegs)))
+    val mxRat = Vec(RenameWidth, Flipped(new RatReadPort(MxLogicRegs)))
     // csr control
     val csrCtrl = Input(new CustomCSRCtrlIO)
     val fromCSR = Input(new CSRToDecode)
@@ -221,7 +221,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
 
   io.out.map(x =>
     when(x.valid){
-      assert(PopCount(VecInit(x.bits.rfWen, x.bits.fpWen, x.bits.vecWen, x.bits.v0Wen, x.bits.vlWen, x.bits.mtilexWen)) < 2.U,
+      assert(PopCount(VecInit(x.bits.rfWen, x.bits.fpWen, x.bits.vecWen, x.bits.v0Wen, x.bits.vlWen, x.bits.mxWen)) < 2.U,
         "DecodeOut: can't wirte two regfile in one uop/instruction")
     }
   )
@@ -253,8 +253,8 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     io.vlRat(i).hold := !io.out(i).ready
 
     // TODO: Select mtilem/n/k
-    io.mtilexRat(i).addr := io.out(i).bits.lsrc(1)
-    io.mtilexRat(i).hold := !io.out(i).ready
+    io.mxRat(i).addr := io.out(i).bits.lsrc(1)
+    io.mxRat(i).hold := !io.out(i).ready
   }
 
   val hasValid = VecInit(io.in.map(_.valid)).asUInt.orR
