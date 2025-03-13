@@ -53,7 +53,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     val vecRat = Vec(RenameWidth, Vec(numVecRatPorts, Flipped(new RatReadPort(VecLogicRegs))))
     val v0Rat = Vec(RenameWidth, Flipped(new RatReadPort(V0LogicRegs)))
     val vlRat = Vec(RenameWidth, Flipped(new RatReadPort(VlLogicRegs)))
-    val mxRat = Vec(RenameWidth, Flipped(new RatReadPort(MxLogicRegs)))
+    val mxRat = Vec(RenameWidth, Vec(3, Flipped(new RatReadPort(MxLogicRegs))))
     // csr control
     val csrCtrl = Input(new CustomCSRCtrlIO)
     val fromCSR = Input(new CSRToDecode)
@@ -252,9 +252,10 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     io.vlRat(i).addr := Vl_IDX.U // vl
     io.vlRat(i).hold := !io.out(i).ready
 
-    // TODO: Select mtilem/n/k
-    io.mxRat(i).addr := io.out(i).bits.lsrc(1)
-    io.mxRat(i).hold := !io.out(i).ready
+    io.mxRat(i)(0).addr := io.out(i).bits.lsrc(2)
+    io.mxRat(i)(1).addr := io.out(i).bits.lsrc(3)
+    io.mxRat(i)(2).addr := io.out(i).bits.lsrc(4)
+    io.mxRat(i).foreach(_.hold := !io.out(i).ready)
   }
 
   val hasValid = VecInit(io.in.map(_.valid)).asUInt.orR
