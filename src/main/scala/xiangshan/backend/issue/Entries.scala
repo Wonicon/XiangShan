@@ -13,7 +13,7 @@ import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Utils.NOnes
 import xiangshan.backend.rob.RobPtr
-import xiangshan.mem.{LqPtr, MemWaitUpdateReq, SqPtr}
+import xiangshan.mem.{LqPtr, MemWaitUpdateReq, SqPtr, MlsqPtr}
 import xiangshan.backend.issue.EntryBundles._
 
 class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule {
@@ -85,6 +85,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val issueTimerVec       = Wire(Vec(params.numEntries, UInt(2.W)))
   val sqIdxVec            = OptionWrapper(params.needFeedBackSqIdx || params.needFeedBackLqIdx, Wire(Vec(params.numEntries, new SqPtr())))
   val lqIdxVec            = OptionWrapper(params.needFeedBackSqIdx || params.needFeedBackLqIdx, Wire(Vec(params.numEntries, new LqPtr())))
+  val mlsqIdxVec          = OptionWrapper(params.needFeedBackSqIdx || params.needFeedBackLqIdx, Wire(Vec(params.numEntries, new MlsqPtr())))
   //src status
   val dataSourceVec       = Wire(Vec(params.numEntries, Vec(params.numRegSrc, DataSource())))
   val loadDependencyVec   = Wire(Vec(params.numEntries, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
@@ -268,7 +269,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
 
   //issueRespVec
   if (params.needFeedBackSqIdx || params.needFeedBackLqIdx) {
-    issueRespVec.lazyZip(sqIdxVec.get.zip(lqIdxVec.get)).lazyZip(issueTimerVec.lazyZip(deqPortIdxReadVec)).foreach { case (issueResp, (sqIdx, lqIdx), (issueTimer, deqPortIdx)) =>
+    issueRespVec.lazyZip(sqIdxVec.get.zip(lqIdxVec.get).zip(mlsqIdxVec.get)).lazyZip(issueTimerVec.lazyZip(deqPortIdxReadVec)).foreach { case (issueResp, ((sqIdx, lqIdx), mlsqIdx), (issueTimer, deqPortIdx)) =>
       val respInDatapath = if (!params.isVecMemIQ) resps(issueTimer(0))(deqPortIdx)
                            else resps(issueTimer)(deqPortIdx)
       val respAfterDatapath = Wire(chiselTypeOf(respInDatapath))
@@ -438,6 +439,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     if (params.needFeedBackSqIdx || params.needFeedBackLqIdx) {
       sqIdxVec.get(entryIdx) := out.entry.bits.payload.sqIdx
       lqIdxVec.get(entryIdx) := out.entry.bits.payload.lqIdx
+      mlsqIdxVec.get(entryIdx) := out.entry.bits.payload.mlsqIdx
     }
     entryInValidVec(entryIdx)       := out.entryInValid
     entryOutDeqValidVec(entryIdx)   := out.entryOutDeqValid

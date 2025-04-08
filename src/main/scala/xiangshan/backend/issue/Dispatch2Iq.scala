@@ -868,6 +868,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
 
   private val isLoadVec = VecInit(io.in.map(x => x.valid && FuType.isLoad(x.bits.fuType)))
   private val isStoreVec = VecInit(io.in.map(x => x.valid && FuType.isStore(x.bits.fuType)))
+  private val isMlsVec = VecInit(io.in.map(x => x.valid && FuType.isMls(x.bits.fuType)))
   private val isAMOVec = io.in.map(x => x.valid && FuType.isAMO(x.bits.fuType))
   private val isStoreAMOVec = io.in.map(x => x.valid && (FuType.isStore(x.bits.fuType) || FuType.isAMO(x.bits.fuType)))
   private val isVLoadVec = VecInit(io.in.map(x => x.valid && FuType.isVLoad(x.bits.fuType)))
@@ -992,6 +993,8 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   for (i <- enqLsqIO.req.indices) {
     when(!io.in(i).fire /* || io.in(i).bits.uopIdx =/= 0.U*/) {
       enqLsqIO.needAlloc(i) := 0.U
+    }.elsewhen(isMlsVec(i)) {
+      enqLsqIO.needAlloc(i) := 4.U // matrix load | store
     }.elsewhen(isStoreVec(i) || isVStoreVec(i)) {
       enqLsqIO.needAlloc(i) := 2.U // store | vstore
     }.otherwise {
@@ -1252,6 +1255,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     uopIn.ready := enqMapDeqMatrix(idx).asUInt.orR && allowDispatch(idx) && lsqCanAccept
     uopIn.bits.lqIdx := s0_enqLsq_resp(idx).lqIdx
     uopIn.bits.sqIdx := s0_enqLsq_resp(idx).sqIdx
+    uopIn.bits.mlsqIdx := s0_enqLsq_resp(idx).mlsqIdx
     dontTouch(isVlsType(idx))
     dontTouch(numLsElem(idx))
   }
