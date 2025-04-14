@@ -118,7 +118,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
       val wakeUpMem: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(backendParams.memSchdParams.get.genIQWakeUpOutValidBundle)
     }
     val og0Cancel = Input(ExuVec())
-    val ldCancel = Vec(backendParams.LdExuCnt, Flipped(new LoadCancelIO))
+    val ldCancel = Vec(backendParams.LdWakeupCnt, Flipped(new LoadCancelIO))
     // from MemBlock
     val fromMem = new Bundle {
       val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
