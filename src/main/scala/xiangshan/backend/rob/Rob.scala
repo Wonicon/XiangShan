@@ -55,6 +55,54 @@ class Rob(params: BackendParams)(implicit p: Parameters) extends LazyModule with
   lazy val module = new RobImp(this)(p, params)
 }
 
+
+/**
+ * 0. 不希望 amuCtrl 存进 ROB，单独一个跟 ROB 一样大的 buffer。先用 reg vec 简易实现？
+ * 1. AMUCtrl 进 ROB，同步进 Buffer
+ * 2. Buffer 满了反压 ROB 入队
+ * 3. 同步 ROB 冲刷
+ * 4. ROB commit 后，开始与 AMU 握手
+ * 5. 保证握手顺序？
+ * @param robSize
+ * @param p
+ */
+class AmuCtrlBuffer(robSize: Int)(implicit p: Parameters) extends Module {
+  val io = IO(new Bundle {
+    // WB
+    val wbValid = Input(Bool())
+    val amuCtrlFromWB = Input(new AmuCtrlIO)
+    val wbRobIndex = Input(UInt(log2Ceil(robSize).W))
+    // Commit
+    val commitValid = Input(Bool())
+    val commitRobIndex = Input(chiselTypeOf(wbRobIndex))
+    // To Amu
+    val amuCtrlToAMU = DecoupledIO(new AmuCtrlIO)
+  })
+
+  val amuCtrlValids = RegInit(VecInit(Seq.tabulate(robSize){ case i => false.B }))
+  val committed = RegInit(VecInit(Seq.tabulate(robSize){ case i => false.B }))
+  val robIndexBuffer = Reg(Vec(robSize, UInt(log2Ceil(robSize).W)))
+  val amuCtrlEntries = Reg(Vec(robSize, new AmuCtrlIO))
+  val wbV_dest = MuxLookup(io.wbRobIndex, 0.U.asTypeOf(false.B))(robIndexBuffer.zip(amuCtrlValids))
+  val wbE_dest = MuxLookup(io.wbRobIndex, 0.U.asTypeOf(io.amuCtrlFromWB))(robIndexBuffer.zip(amuCtrlEntries))
+  when (io.wbValid) {
+    wbV_dest := true.B
+    wbE_dest := io.amuCtrlFromWB
+  }
+
+  val commit_dest = MuxLookup(io.wbRobIndex, 0.U.asTypeOf(io.amuCtrlFromWB))(robIndexBuffer.zip(amuCtrlEntries))
+  when (io.wbValid) {
+  }
+
+  val walk_ptr = RegInit(0.U)
+  val valid = amuCtrlValids.zipWithIndex.map{ case (v, i) => v && (i.U === walk_ptr) }.reduce(_ || _)
+  io.amuCtrlToAMU.valid := valid
+  io.amuCtrlToAMU.bits := amuCtrlEntries(walk_ptr)
+  when (io.amuCtrlToAMU.fire || !amuCtrlValids(walk_ptr)) {
+    walk_ptr := walk_ptr + 1.U
+  }
+}
+
 class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendParams) extends LazyModuleImp(wrapper)
   with HasXSParameter with HasCircularQueuePtrHelper with HasPerfEvents with HasCriticalErrors {
 
@@ -405,6 +453,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   private val commitIsMTypeVec = VecInit(io.commits.commitValid.zip(io.commits.info).map { case (valid, info) => io.commits.isCommit && valid && info.isMsettype })
   private val walkIsMTypeVec = VecInit(io.commits.walkValid.zip(walkInfo).map { case (valid, info) => io.commits.isWalk && valid && info.isMsettype })
+  // 传入 mtype commit 数量，驱动 mtypebuffer 出队。
   mtypeBuffer.io.fromRob.commitSize := PopCount(commitIsMTypeVec)
   mtypeBuffer.io.fromRob.walkSize := PopCount(walkIsMTypeVec)
   mtypeBuffer.io.snpt := io.snpt
@@ -985,7 +1034,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // update robEntries valid
   for (i <- 0 until RobSize) {
     val enqOH = VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === i.U)).map(x => x._1 && x._2))
-    val commitCond = io.commits.isCommit && io.commits.commitValid.zip(deqPtrVec.map(_.value === i.U)).map(x => x._1 && x._2).reduce(_ || _)
+    val deqSelOH = deqPtrVec.map(_.value === i.U)
+    val needAmuCtrlOH = io.commits.info.zip(deqSelOH).map{ case (info, sel) => info.needAmuCtrl && sel }
+    val amuFireOH = io.amuCtrl.zip(needAmuCtrlOH).map{ case (amuIO, needAmu) => amuIO.ready & needAmu }
+    val commitValidOH = io.commits.commitValid.zip(deqSelOH.zip(amuFireOH)).map { case (v, (s, a)) => v & s & a }
+    val commitCond = io.commits.isCommit && commitValidOH.reduce(_ || _)
     assert(PopCount(enqOH) < 2.U, s"robEntries$i enqOH is not one hot")
     val needFlush = redirectValidReg && Mux(
       (redirectEnd > redirectBegin) && !redirectAll,
