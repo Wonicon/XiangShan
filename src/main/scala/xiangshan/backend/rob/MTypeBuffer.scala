@@ -90,6 +90,11 @@ class MTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   private val enqPtrOHVec = VecInit.tabulate(RenameWidth + 1)(enqPtrOHShift.left)
   private val enqPtrVecNext = WireInit(enqPtrVec)
 
+  /**
+   * MTypeBuffer 出队逻辑：
+   * 1. 每周期 ROB 给出 commitSize，deq 状态无条件更新累加，不为 0 的 commitSize 才能驱动出队；
+   * 2. 每周期最大出队数 CommitWidth，[[commitSize]] 为累计的待出队数量。
+    */
   private val deqPtrVec = RegInit(VecInit.tabulate(CommitWidth)(idx => MTypeBufferPtr(flag = false, idx)))
   private val deqPtr = deqPtrVec.head
   private val deqPtrOH = RegInit(1.U(size.W))
@@ -195,6 +200,17 @@ class MTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   deqPtrVecNext.zipWithIndex.map{ case(ptr, i) => ptr := deqPtrNext + i.U }
   deqPtrVec := deqPtrVecNext
 
+  /**
+   * 入队指针，数量对应 [[RenameWidth]]。
+   * 每个下标 i 对应 [[needAllocVec]] 前 i 项有效的数量为下标的 enqPtr entry。
+   * 如 needAllocVec 为      0 0 1 1 0 1
+   * 则 PopCount(take(i)) 为 0 0 0 1 1 2
+   * 即前 3 个 enqPtr 被使用。
+   *
+   * 注意这里是用下标作为 take 的 size，也就是说是第 0 到 i-1 项，
+   * 这保证了在下标 i 第 k 个有效的 req 对应的 ptr 是 k-1 (k <= i).
+   * 比如，req_3 第 1 个有效，take(3) 即 req_0 到 req_2，PopCount 为 0，req_3 分配到 ptrVec(0).
+   */
   private val allocPtrVec: Vec[MTypeBufferPtr] = VecInit((0 until RenameWidth).map(i => enqPtrVec(PopCount(needAllocVec.take(i)))))
   private val mtypeBufferReadPtrVecNext: Vec[MTypeBufferPtr] = Mux1H(Seq(
     (stateNext === s_idle) -> deqPtrVecNext,

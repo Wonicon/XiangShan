@@ -34,6 +34,12 @@ import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfo, LsTopdownInfo}
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.SnapshotGenerator
 
+/**
+ * 维护 ptr 数列，io.enq[] 决定 dispatchNum,
+ * 无 redirect 时 ptr 统一偏移 dispatchNum,
+ * 有 redirect 时 ptr 修正为从从 redirect.bits.robIdx 开始的递增数列
+ * @param p
+ */
 class RobEnqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     // for input redirect

@@ -238,6 +238,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val enqPtr = enqPtrVec(0)
   val deqPtr = deqPtrVec(0)
   val walkPtr = walkPtrVec(0)
+  // WHZ: enq:010110 -> allocPtr:0/0/1/1/2/3 entry pointed by ptr 0,1,2 will be allocated.
   val allocatePtrVec = VecInit((0 until RenameWidth).map(i => enqPtrVec(PopCount(io.enq.req.take(i).map(req => req.valid && req.bits.firstUop)))))
   io.enq.canAccept := allowEnqueue && !hasBlockBackward && rab.io.canEnq && vtypeBuffer.io.canEnq && mtypeBuffer.io.canEnq && !io.fromVecExcpMod.busy
   io.enq.canAcceptForDispatch := allowEnqueueForDispatch && !hasBlockBackward && rab.io.canEnqForDispatch && vtypeBuffer.io.canEnqForDispatch && mtypeBuffer.io.canEnqForDispatch && !io.fromVecExcpMod.busy
