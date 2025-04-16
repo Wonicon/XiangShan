@@ -12,7 +12,7 @@ import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.NumLsElem
 import xiangshan.backend.rob.RobPtr
-import xiangshan.mem.{LqPtr, MemWaitUpdateReq, SqPtr}
+import xiangshan.mem.{LqPtr, MemWaitUpdateReq, SqPtr, MlsqPtr}
 
 object EntryBundles extends HasCircularQueuePtrHelper {
 
@@ -61,6 +61,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
   class StatusVecMemPart(implicit p:Parameters, params: IssueBlockParams) extends Bundle {
     val sqIdx                 = new SqPtr
     val lqIdx                 = new LqPtr
+    val mlsqIdx               = new MlsqPtr
     val numLsElem             = NumLsElem()
   }
 
@@ -71,6 +72,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val uopIdx                = Option.when(params.isVecMemIQ)(Output(UopIdx()))
     val sqIdx                 = Option.when(params.needFeedBackSqIdx)(new SqPtr())
     val lqIdx                 = Option.when(params.needFeedBackLqIdx)(new LqPtr())
+    val mlsqIdx               = Option.when(params.needFeedBackMlsqIdx)(new MlsqPtr())
   }
 
   object RespType {
@@ -114,7 +116,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     //cancel
     val og0Cancel             = Input(ExuVec())
     val og1Cancel             = Input(ExuVec())
-    val ldCancel              = Vec(backendParams.LdExuCnt, Flipped(new LoadCancelIO))
+    val ldCancel              = Vec(backendParams.LdWakeupCnt, Flipped(new LoadCancelIO))
     //deq sel
     val deqSel                = Input(Bool())
     val deqPortIdxWrite       = Input(UInt(1.W))
@@ -182,8 +184,6 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     common.deqSuccess         := (if (params.isVecMemIQ) status.issued else true.B) &&
       commonIn.issueResp.valid && RespType.succeed(commonIn.issueResp.bits.resp) && !common.srcLoadCancelVec.asUInt.orR
 
-    // debug: print size of common.srcWakeupByWB and commonIn.wakeUpFromWB
-    println(s"common.srcWakeupByWB size: ${common.srcWakeupByWB.size}, commonIn.wakeUpFromWB size: ${commonIn.wakeUpFromWB.size}")
     common.srcWakeupByWB      := commonIn.wakeUpFromWB.map{ bundle => 
                                     val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
                                     if (params.numRegSrc == 5) {
@@ -541,7 +541,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     //cancel
     val srcLoadDependency     = Input(Vec(params.numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
     val og0Cancel             = Input(ExuVec())
-    val ldCancel              = Vec(backendParams.LdExuCnt, Flipped(new LoadCancelIO))
+    val ldCancel              = Vec(backendParams.LdWakeupCnt, Flipped(new LoadCancelIO))
   }
 
   class EnqDelayOutBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {

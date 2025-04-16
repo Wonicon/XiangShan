@@ -27,7 +27,7 @@ import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend._
-import xiangshan.mem.{LqPtr, SqPtr}
+import xiangshan.mem.{LqPtr, SqPtr, MlsqPtr}
 import xiangshan.backend.Bundles.{DynInst, UopIdx}
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.frontend.{AllAheadFoldedHistoryOldestBits, AllFoldedHistories, BPUCtrl, CGHPtr, FtqPtr, FtqToCtrlIO}
@@ -252,6 +252,7 @@ class PerfDebugInfo(implicit p: Parameters) extends XSBundle {
 class LSIdx(implicit p: Parameters) extends XSBundle {
   val lqIdx = new LqPtr
   val sqIdx = new SqPtr
+  val mlsqIdx = new MlsqPtr
 }
 
 // CfCtrl -> MicroOp at Rename Stage
@@ -263,6 +264,7 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   val instrSize = UInt(log2Ceil(RenameWidth + 1).W)
   val lqIdx = new LqPtr
   val sqIdx = new SqPtr
+  val mlsqIdx = new MlsqPtr
   val eliminatedMove = Bool()
   val snapshot = Bool()
   val debugInfo = new PerfDebugInfo
@@ -450,6 +452,7 @@ class RSFeedback(isVector: Boolean = false)(implicit p: Parameters) extends XSBu
   val dataInvalidSqIdx = new SqPtr
   val sqIdx = new SqPtr
   val lqIdx = new LqPtr
+  val mlsqIdx = new MlsqPtr
 }
 
 class MemRSFeedbackIO(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
