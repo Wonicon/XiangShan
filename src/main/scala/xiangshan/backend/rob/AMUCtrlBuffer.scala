@@ -54,13 +54,14 @@ class AmuCtrlBuffer(robSize: Int)(implicit p: Parameters) extends XSModule with 
 
   val commit_dest = MuxLookup(io.wb.bits.robIndex, 0.U.asTypeOf(io.wb.bits.amuCtrl))(robIndexBuffer.zip(amuCtrlEntries))
   when (io.wb.valid) {
+
   }
 
   val walk_ptr = RegInit(0.U)
   val valid = amuCtrlValids.zipWithIndex.map{ case (v, i) => v && (i.U === walk_ptr) }.reduce(_ || _)
-  io.amuCtrlToAMU.valid := valid
-  io.amuCtrlToAMU.bits := amuCtrlEntries(walk_ptr)
-  when (io.amuCtrlToAMU.fire || !amuCtrlValids(walk_ptr)) {
+  io.toAMU.valid := valid
+  io.toAMU.bits := amuCtrlEntries(walk_ptr)
+  when (io.toAMU.fire || !amuCtrlValids(walk_ptr)) {
     walk_ptr := walk_ptr + 1.U
   }
 }

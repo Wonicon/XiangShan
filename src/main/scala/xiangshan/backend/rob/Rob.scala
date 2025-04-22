@@ -906,11 +906,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   /**
    * pointers and counters
    */
-  val deqPtrGenModule = Module(new NewRobDeqPtrWrapper)
+  val deqPtrGenModule: NewRobDeqPtrWrapper = Module(new NewRobDeqPtrWrapper)
   deqPtrGenModule.io.state := state
   deqPtrGenModule.io.deq_v := commit_vDeqGroup
   deqPtrGenModule.io.deq_w := commit_wDeqGroup
   deqPtrGenModule.io.exception_state := exceptionDataRead
+  
   deqPtrGenModule.io.intrBitSetReg := intrBitSetReg
   deqPtrGenModule.io.hasNoSpecExec := hasWaitForward
   deqPtrGenModule.io.allowOnlyOneCommit := allowOnlyOneCommit

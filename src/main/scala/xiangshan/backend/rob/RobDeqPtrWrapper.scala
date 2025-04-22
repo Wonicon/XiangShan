@@ -37,12 +37,12 @@ import xiangshan.backend.rename.SnapshotGenerator
 class NewRobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     // for commits/flush
-    val state = Input(UInt(2.W))
-    val deq_v = Vec(CommitWidth, Input(Bool()))
-    val deq_w = Vec(CommitWidth, Input(Bool()))
-    val hasCommitted = Vec(CommitWidth, Input(Bool()))
-    val allCommitted = Input(Bool())
-    val exception_state = Flipped(ValidIO(new RobExceptionInfo))
+    val state: UInt = Input(UInt(2.W))
+    val deq_v: Vec[Bool] = Vec(CommitWidth, Input(Bool()))
+    val deq_w: Vec[Bool] = Vec(CommitWidth, Input(Bool()))
+    val hasCommitted: Vec[Bool] = Vec(CommitWidth, Input(Bool()))
+    val allCommitted: Bool = Input(Bool())
+    val exception_state: ValidIO[RobExceptionInfo] = Flipped(ValidIO(new RobExceptionInfo))
     // for flush: when exception occurs, reset deqPtrs to range(0, CommitWidth)
     val intrBitSetReg = Input(Bool())
     val allowOnlyOneCommit = Input(Bool())
