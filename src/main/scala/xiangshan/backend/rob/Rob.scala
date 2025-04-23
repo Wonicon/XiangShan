@@ -1004,8 +1004,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val amuFireOH = io.amuCtrl.zip(needAmuCtrlOH).map{ case (amuIO, needAmu) => amuIO.ready & needAmu }
     val commitValidOH = io.commits.commitValid.zip(deqSelOH.zip(amuFireOH)).map { case (v, (s, a)) => v & s & a }
     val commitCond = io.commits.isCommit && commitValidOH.reduce(_ || _)
-    amuBuffer.io.commit.valid := commitCond
-    amuBuffer.io.commit.bits.robIndex := i.U
     assert(PopCount(enqOH) < 2.U, s"robEntries$i enqOH is not one hot")
     val needFlush = redirectValidReg && Mux(
       (redirectEnd > redirectBegin) && !redirectAll,
@@ -1100,11 +1098,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       }
     }
 
-    val amuCtrlCanWbSeq = amuCtrl_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
-    val amuCtrlRes = amuCtrlCanWbSeq.zip(amuCtrl_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.amuCtrl.get.asUInt, 0.U) }.fold(0.U)(_ | _)
-    when(robEntries(i).valid && amuCtrlRes.orR) {
-      robEntries(i).amuCtrl := amuCtrlRes.asTypeOf(new AmuCtrlIO)
-    }
+    // val amuCtrlCanWbSeq = amuCtrl_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
+    // val amuCtrlRes = amuCtrlCanWbSeq.zip(amuCtrl_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.amuCtrl.get.asUInt, 0.U) }.fold(0.U)(_ | _)
+    // when(robEntries(i).valid && amuCtrlRes.orR) {
+    //   robEntries(i).amuCtrl := amuCtrlRes.asTypeOf(new AmuCtrlIO)
+    // }
 
     val fflagsCanWbSeq = fflags_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.wflags.getOrElse(false.B))
     val fflagsRes = fflagsCanWbSeq.zip(fflags_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.fflags.get, 0.U) }.fold(false.B)(_ | _)

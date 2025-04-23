@@ -2,10 +2,45 @@ package xiangshan.backend.rob
 
 import chisel3._
 import chisel3.util._
+import chisel3.experimental.BundleLiterals._
 import org.chipsalliance.cde.config.Parameters
 import utility.HasCircularQueuePtrHelper
-import xiangshan.XSModule
+import xiangshan._
+import xiangshan.backend.BackendParams
 import xiangshan.backend.fu.matrix.Bundles._
+
+
+class AmuCtrlBufferIO()(implicit val p: Parameters, params: BackendParams) extends Bundle with HasXSParameter {
+  // rob enq
+  val enqReqValids = Input(Vec(RenameWidth, Bool()))
+  val enqAllocPtrVec = Input(Vec(RenameWidth, new RobPtr))
+  val enqNeedAMU = Input(Vec(RenameWidth, Bool()))
+  val outCanEnqueue = Output(Bool())
+
+  // rob wb
+  val wb = Flipped(params.genWrite2CtrlBundles)
+
+  // Commit
+  val deqCommitPtrVec = Input(Vec(CommitWidth, new RobPtr))
+  val deqCommitValid = Input(Vec(CommitWidth, Bool()))
+
+  // Redirect
+  val redirect = Input(Bool())
+  val walkPtr = Input(new RobPtr)
+
+  // To Amu
+  val toAMU = DecoupledIO(Vec(CommitWidth, new AmuCtrlIO))
+}
+
+
+class AmuCtrlEntry(implicit p: Parameters) extends XSBundle {
+  val valid = Bool()
+  val needAMU = Bool()
+  val writebacked = Bool()
+  val committed = Bool()
+  val amuCtrl = new AmuCtrlIO
+}
+
 
 /**
  * 0. 不希望 amuCtrl 存进 ROB，单独一个跟 ROB 一样大的 buffer。先用 reg vec 简易实现？
@@ -15,132 +50,94 @@ import xiangshan.backend.fu.matrix.Bundles._
  * 4. ROB commit 后，开始与 AMU 握手
  * 5. 保证握手顺序？
  *
- * @param robSize
  * @param p
  */
-class AmuCtrlBuffer(robSize: Int)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
-  val RenameWidth = 6
-  val CommitWidth = 6
+class AmuCtrlBuffer()(implicit val p: Parameters, params: BackendParams) extends XSModule
+  with HasXSParameter with HasCircularQueuePtrHelper {
 
-  val io = IO(new Bundle {
-    // rob enq
-    val enq = Flipped(DecoupledIO(Vec(RenameWidth, new Bundle {
-      val robIndex = UInt(log2Ceil(robSize).W)
-    })))
-    // WB
-    val wb = Flipped(DecoupledIO(Vec(RenameWidth, new Bundle {
-      val amuCtrl = new AmuCtrlIO
-      val robIndex = UInt(log2Ceil(robSize).W)
-    })))
-    // Redirect
-    val walk = Flipped(DecoupledIO(Vec(CommitWidth, new Bundle {
-      val robIndex = UInt(log2Ceil(robSize).W)
-    })))
-    // Commit
-    val commit = Flipped(DecoupledIO(Vec(CommitWidth, new Bundle {
-      val robIndex = UInt(log2Ceil(robSize).W)
-    })))
-    // To Amu
-    val toAMU = DecoupledIO(Vec(CommitWidth, new AmuCtrlIO))
-  })
+  val io = IO(new AmuCtrlBufferIO)
 
-  // 状态定义
   val s_idle :: s_walk :: Nil = Enum(2)
   val state = RegInit(s_idle)
   val state_next = Wire(chiselTypeOf(state))
 
-  // 指针定义
-  val enqPtrVec = RegInit(VecInit.tabulate(RenameWidth)(_.U.asTypeOf(new RobPtr)))
-  val deqPtrVec = RegInit(VecInit.tabulate(CommitWidth)(_.U.asTypeOf(new RobPtr)))
-  val walkPtrVec = RegInit(VecInit.tabulate(CommitWidth)(_.U.asTypeOf(new RobPtr)))
+  val amuCtrlEntries = RegInit(VecInit.fill(RobSize)((new AmuCtrlEntry).Lit(_.valid -> false.B)))
 
-  // 存储定义
-  val amuCtrlValids = RegInit(VecInit(Seq.fill(robSize){ false.B }))
-  val committed = RegInit(VecInit(Seq.fill(robSize){ false.B }))
-  val amuCtrlEntries = Reg(Vec(robSize, new AmuCtrlIO))
+  // Enqueue
+  // DynInst does not carry amuCtrl info,
+  // so we only need to mark valid for entries who need amuCtrl.
+  for (i <- 0 until RobSize) {
+    val indexMatch = io.enqAllocPtrVec.map(_.value === i.U)
+    val enqOH = Wire(VecInit(io.enqReqValids.zip(indexMatch).map(x => x._1 && x._2)))
+    val needOH = Wire(VecInit(io.enqNeedAMU.zip(indexMatch).map(x => x._1 && x._2)))
+    amuCtrlEntries(i).valid := enqOH.asUInt.orR
+    amuCtrlEntries(i).needAMU := needOH.asUInt.orR
+  }
 
-  // 计算实际需要分配的条目数
-  val needAllocVec = io.enq.bits.map(req => req.robIndex =/= 0.U)
-  val enqCount = PopCount(needAllocVec)
+  // TODO: need detailed correct logic
+  io.outCanEnqueue := amuCtrlEntries.map(_.valid).reduce(_ || _)
 
-  // 计算分配指针
-  val allocatePtrVec = VecInit((0 until RenameWidth).map(i => 
-    enqPtrVec(PopCount(needAllocVec.take(i)))))
-
-  // 入队逻辑
-  val canEnqueue = !isFull(enqPtrVec(0), deqPtrVec(0))
-  io.enq.ready := canEnqueue
-
-  for (i <- 0 until RenameWidth) {
-    when(io.enq.fire) {
-      amuCtrlValids(io.enq.bits(i).robIndex) := true.B
-      committed(io.enq.bits(i).robIndex) := false.B
+  // Writeback
+  val amuCtrlWb = io.wb.filter(_.bits.amuCtrl.nonEmpty).toSeq
+  val amuCtrl_wb = amuCtrlWb
+  for (i <- 0 until RobSize) {
+    val amuCtrlCanWbSeq = amuCtrl_wb.map(wb => wb.valid && wb.bits.robIdx.value === i.U)
+    val amuCtrlRes = amuCtrlCanWbSeq.zip(amuCtrl_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.amuCtrl.get.asUInt, 0.U) }.fold(0.U)(_ | _)
+    when (amuCtrlEntries(i).valid && amuCtrlRes.orR) {
+      amuCtrlEntries(i).writebacked := true.B
+      amuCtrlEntries(i).amuCtrl := amuCtrlRes.asTypeOf(new AmuCtrlIO)
     }
   }
 
-  // 写回逻辑
-  for (i <- 0 until RenameWidth) {
-    when(io.wb.fire) {
-      amuCtrlEntries(io.wb.bits(i).robIndex) := io.wb.bits(i).amuCtrl
+  // Commit
+  for (i <- 0 until RobSize) {
+    val deqSel = io.deqCommitPtrVec.map(_.value === i.U)
+    val deqValid = io.deqCommitValid.zip(deqSel).map(x => x._1 && x._2)
+    val commitCond = deqValid.reduce(_ || _)
+    val ent = amuCtrlEntries(i)
+    when (commitCond) {
+      amuCtrlEntries(i).committed := true.B
     }
   }
 
-  // 提交逻辑
-  for (i <- 0 until CommitWidth) {
-    when(io.commit.fire) {
-      committed(io.commit.bits(i).robIndex) := true.B
-    }
+  // To AMU
+  val deqPtr = RegInit(new RobPtr)
+  val entriesCommit = (0 until CommitWidth).map(i => amuCtrlEntries(deqPtr.value + i.U))
+  val commitCandicates = entriesCommit.map(e => e.valid && e.committed)
+  val amuReqValids = entriesCommit.map(e => e.valid && e.needAMU && e.writebacked && e.committed)
+  val amuReqValidCount = PopCount(VecInit(amuReqValids).asUInt)
+  io.toAMU.valid := amuReqValids.reduce(_ || _)
+  io.toAMU.bits.zipWithIndex.foreach { case (amuCtrl, i) =>
+    amuCtrl := amuCtrlEntries(deqPtr.value + i.U).amuCtrl
   }
-
-  // Walk 逻辑
-  for (i <- 0 until CommitWidth) {
-    when(io.walk.fire) {
-      amuCtrlValids(io.walk.bits(i).robIndex) := false.B
-      committed(io.walk.bits(i).robIndex) := false.B
-    }
-  }
-
-  // 状态转换
-  when(io.walk.valid) {
-    state_next := s_walk
-  }.otherwise {
-    state_next := s_idle
-  }
-  state := state_next
-
-  // 出队逻辑
-  for (i <- 0 until CommitWidth) {
-    val canDequeue = amuCtrlValids(deqPtrVec(i).value) && committed(deqPtrVec(i).value)
-    io.toAMU.bits(i) := amuCtrlEntries(deqPtrVec(i).value)
-  }
-
-  io.toAMU.valid := canEnqueue && state === s_idle
-
-  when(io.toAMU.fire) {
+  // 假设 amu bus 的 ready 总能接收全部宽度的请求
+  // 如果当前 commit window 里所有 amu req 都一次性握手，或者没有 amu req，则可以批量退队
+  // (这里都是已经在 ROB 中标记已经 commit 的 entry，没有 AMU 需求可以直接退)
+  // TODO 但是要避免有 amu 需求的 entry 还没有 writeback 或 commit，这时候不能批量退队当前 commit 窗口。
+  when (io.toAMU.fire || ~VecInit(amuReqValids).asUInt.orR) {
+    deqPtr := deqPtr + PopCount(VecInit(commitCandicates).asUInt)
     for (i <- 0 until CommitWidth) {
-      amuCtrlValids(deqPtrVec(i).value) := false.B
-      committed(deqPtrVec(i).value) := false.B
+      // TODO: back to back enqueue?
+      amuCtrlEntries(deqPtr.value + i.U).valid := false.B
     }
   }
 
-  // 指针更新
-  for (i <- 0 until RenameWidth) {
-    when(io.walk.valid) {
-      enqPtrVec(i) := io.walk.bits(0).robIndex + i.U
-    }.otherwise {
-      enqPtrVec(i) := enqPtrVec(i) + enqCount
-    }
+  // Walk
+  val currWalkPtr = RegInit(new RobPtr)
+  when (state === s_idle && io.redirect) {
+    currWalkPtr := io.walkPtr
+    state := s_walk
   }
 
-  val commitCnt = PopCount(io.commit.bits.map(_.robIndex =/= 0.U))
-  for (i <- 0 until CommitWidth) {
-    deqPtrVec(i) := deqPtrVec(i) + commitCnt
-  }
-
-  val walkCnt = PopCount(io.walk.bits.map(_.robIndex =/= 0.U))
-  when(state === s_walk) {
+  when (state === s_walk) {
     for (i <- 0 until CommitWidth) {
-      walkPtrVec(i) := walkPtrVec(i) + walkCnt
+      amuCtrlEntries(currWalkPtr.value + i.U).valid := true.B
+      amuCtrlEntries(currWalkPtr.value + i.U).needAMU := true.B
     }
+    currWalkPtr := currWalkPtr + CommitWidth.U
+  }
+
+  when (currWalkPtr === deqPtr) {
+    state := s_idle
   }
 }
