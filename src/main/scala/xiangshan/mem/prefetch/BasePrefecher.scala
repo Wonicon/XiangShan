@@ -31,7 +31,7 @@ class L2PrefetchReq(implicit p: Parameters) extends XSBundle {
 }
 
 class PrefetcherIO()(implicit p: Parameters) extends XSBundle {
-  val ld_in = Flipped(Vec(backendParams.LdExuCnt, ValidIO(new LdPrefetchTrainBundle())))
+  val ld_in = Flipped(Vec(backendParams.LdPfTrainCnt, ValidIO(new LdPrefetchTrainBundle())))
   val st_in = Flipped(Vec(backendParams.StaExuCnt, ValidIO(new StPrefetchTrainBundle())))
   val tlb_req = new TlbRequestIO(nRespDups = 2)
   val l1_req = DecoupledIO(new L1PrefetchReq())
