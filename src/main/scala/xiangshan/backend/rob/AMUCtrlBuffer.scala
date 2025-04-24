@@ -49,8 +49,6 @@ class AmuCtrlEntry(implicit p: Parameters) extends XSBundle {
  * 3. 同步 ROB 冲刷
  * 4. ROB commit 后，开始与 AMU 握手
  * 5. 保证握手顺序？
- *
- * @param p
  */
 class AmuCtrlBuffer()(implicit val p: Parameters, params: BackendParams) extends XSModule
   with HasXSParameter with HasCircularQueuePtrHelper {

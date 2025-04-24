@@ -140,7 +140,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     })
 
     // to AMU
-    val amuCtrl = Vec(CommitWidth, DecoupledIO(new AmuCtrlIO))
+    val amuCtrl = DecoupledIO(Vec(CommitWidth, new AmuCtrlIO))
   })
 
   val exuWBs: Seq[ValidIO[ExuOutput]] = io.exuWriteback.filter(!_.bits.params.hasStdFu).toSeq
@@ -164,7 +164,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val rab = Module(new RenameBuffer(RabSize))
   val vtypeBuffer = Module(new VTypeBuffer(VTypeBufferSize))
   val mtypeBuffer = Module(new MTypeBuffer(MTypeBufferSize))
-  val amuBuffer = Module(new AmuCtrlBuffer(RobSize))
+  val amuBuffer = Module(new AmuCtrlBuffer())
   val bankNum = 8
   assert(RobSize % bankNum == 0, "RobSize % bankNum must be 0")
   val robEntries = RegInit(VecInit.fill(RobSize)((new RobEntryBundle).Lit(_.valid -> false.B)))
@@ -404,8 +404,18 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     sink.bits := source.bits
   }
 
-  // TODO: wide issue
-  amuBuffer.io.enq <> io.enq.req(0)
+  /**
+   * connection of [[amuBuffer]]
+   */
+  amuBuffer.io.enqReqValids := io.enq.req.map(_.valid)
+  amuBuffer.io.enqAllocPtrVec := allocatePtrVec
+  amuBuffer.io.enqNeedAMU := io.enq.req.map(req => req.valid && req.bits.needAmuCtrl)
+  amuBuffer.io.wb := io.writeback
+  amuBuffer.io.deqCommitPtrVec := deqPtrVec
+  amuBuffer.io.deqCommitValid := io.commits.commitValid
+  amuBuffer.io.redirect := io.redirect.valid
+  amuBuffer.io.walkPtr := walkPtrVec
+  io.amuCtrl <> amuBuffer.io.toAMU
 
   private val commitIsMTypeVec = VecInit(io.commits.commitValid.zip(io.commits.info).map { case (valid, info) => io.commits.isCommit && valid && info.isMsettype })
   private val walkIsMTypeVec = VecInit(io.commits.walkValid.zip(walkInfo).map { case (valid, info) => io.commits.isWalk && valid && info.isMsettype })
@@ -853,10 +863,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     // io.amuCtrl(i).bits := commitInfo(i).amuCtrl
   }
 
-  // TODO allow wide issue
-  // io.amuCtrl <> amuBuffer.amuCtrl
-  io.amuCtrl(0) <> amuBuffer.io.toAMU
-
   // sync fflags/dirty_fs/vxsat to csr
   io.csr.fflags   := RegNextWithEnable(fflags)
   io.csr.dirty_fs := GatedValidRegNext(dirty_fs)
@@ -1001,7 +1007,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val enqOH = VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === i.U)).map(x => x._1 && x._2))
     val deqSelOH = deqPtrVec.map(_.value === i.U)
     val needAmuCtrlOH = io.commits.info.zip(deqSelOH).map{ case (info, sel) => info.needAmuCtrl && sel }
-    val amuFireOH = io.amuCtrl.zip(needAmuCtrlOH).map{ case (amuIO, needAmu) => amuIO.ready & needAmu }
+    val amuFireOH = needAmuCtrlOH.map{ io.amuCtrl.ready & _ }
     val commitValidOH = io.commits.commitValid.zip(deqSelOH.zip(amuFireOH)).map { case (v, (s, a)) => v & s & a }
     val commitCond = io.commits.isCommit && commitValidOH.reduce(_ || _)
     assert(PopCount(enqOH) < 2.U, s"robEntries$i enqOH is not one hot")
@@ -1176,9 +1182,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       }
     }
 
-    val amuCtrlCanWbSeq = amuCtrl_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i))
-    val amuCtrlRes = amuCtrlCanWbSeq.zip(amuCtrl_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.amuCtrl.get.asUInt, 0.U) }.fold(0.U)(_ | _)
-    needUpdate(i).amuCtrl := Mux(!robBanksRdata(i).valid && instCanEnqFlag, 0.U, robBanksRdata(i).amuCtrl.asUInt | amuCtrlRes).asTypeOf(AmuCtrlIO())
+    // val amuCtrlCanWbSeq = amuCtrl_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i))
+    // val amuCtrlRes = amuCtrlCanWbSeq.zip(amuCtrl_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.amuCtrl.get.asUInt, 0.U) }.fold(0.U)(_ | _)
+    // needUpdate(i).amuCtrl := Mux(!robBanksRdata(i).valid && instCanEnqFlag, 0.U, robBanksRdata(i).amuCtrl.asUInt | amuCtrlRes).asTypeOf(AmuCtrlIO())
 
     val fflagsCanWbSeq = fflags_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i) && writeback.bits.wflags.getOrElse(false.B))
     val fflagsRes = fflagsCanWbSeq.zip(fflags_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.fflags.get, 0.U) }.fold(false.B)(_ | _)
