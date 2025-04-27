@@ -249,7 +249,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }.elsewhen(allCommitted || io.commits.isWalk && !changeBankAddrToDeqPtr){
     robBanksRaddrNextLine := Mux(robBanksRaddrThisLine.head(1) === 1.U, 1.U, robBanksRaddrThisLine << 1)
   }.elsewhen(io.commits.isWalk && changeBankAddrToDeqPtr){
-    robBanksRaddrNextLine := UIntToOH(deqPtr.value(deqPtr.value.getWidth-1, bankAddrWidth))
+    robBanksRaddrNextLine := UIntToOH(deqPtr.value(deqPtr.value.getWidth-1, bankAddrWidth))z
   }.otherwise(
     robBanksRaddrNextLine := robBanksRaddrThisLine
   )
@@ -414,7 +414,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   amuBuffer.io.deqCommitPtrVec := deqPtrVec
   amuBuffer.io.deqCommitValid := io.commits.commitValid
   amuBuffer.io.redirect := io.redirect.valid
-  amuBuffer.io.walkPtr := walkPtrVec
+  amuBuffer.io.walkPtr := walkPtrVec(0)
   io.amuCtrl <> amuBuffer.io.toAMU
 
   private val commitIsMTypeVec = VecInit(io.commits.commitValid.zip(io.commits.info).map { case (valid, info) => io.commits.isCommit && valid && info.isMsettype })
