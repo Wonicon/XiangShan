@@ -29,7 +29,7 @@ class AmuCtrlBufferIO()(implicit val p: Parameters, params: BackendParams) exten
   val walkPtr = Input(new RobPtr)
 
   // To Amu
-  val toAMU = DecoupledIO(Vec(CommitWidth, new AmuCtrlIO))
+  val toAMU = Vec(CommitWidth, DecoupledIO(new AmuCtrlIO))
 }
 
 
@@ -115,9 +115,11 @@ class AmuCtrlBuffer()(implicit override val p: Parameters, params: BackendParams
   val commitCandicates = entriesCommit.map(e => e.valid && e.committed)
   val amuReqValids = entriesCommit.map(e => e.valid && e.needAMU && e.writebacked && e.committed)
   val amuReqValidCount = PopCount(VecInit(amuReqValids).asUInt)
-  io.toAMU.valid := amuReqValids.reduce(_ || _)
-  io.toAMU.bits.zipWithIndex.foreach { case (amuCtrl, i) =>
-    amuCtrl := amuCtrlEntries(deqPtr.value + i.U).amuCtrl
+  io.toAMU.zip(amuReqValids).foreach { case (amuCtrl, valid) =>
+    amuCtrl.valid := valid
+  }
+  io.toAMU.zipWithIndex.foreach { case (amuCtrl, i) =>
+    amuCtrl.bits := amuCtrlEntries(deqPtr.value + i.U).amuCtrl
   }
 
   // 假设 amu bus 的 ready 总能接收全部宽度的请求
@@ -130,17 +132,19 @@ class AmuCtrlBuffer()(implicit override val p: Parameters, params: BackendParams
   val hasCommitted = RegInit(VecInit(Seq.fill(CommitWidth)(false.B)))
   val allCommitted = Wire(Bool())
 
+  val toAMU_anyFire = io.toAMU.map(_.fire).reduce(_ || _)
+
   when(allCommitted) {
     hasCommitted := 0.U.asTypeOf(hasCommitted)
-  }.elsewhen(io.toAMU.fire) {
+  }.elsewhen(toAMU_anyFire) {
     for (i <- 0 until CommitWidth) {
       hasCommitted(i) := commitCandicates(i) || hasCommitted(i)
     }
   }
-  allCommitted := io.toAMU.fire && commitCandicates.last
+  allCommitted := toAMU_anyFire && commitCandicates.last
 
   // Update deqPtr and invalidate entries
-  when(io.toAMU.fire) {
+  when(toAMU_anyFire) {
     val deqSteps = PopCount(VecInit(commitCandicates).asUInt)
     deqPtr := deqPtr + deqSteps
     for (i <- 0 until CommitWidth) {
