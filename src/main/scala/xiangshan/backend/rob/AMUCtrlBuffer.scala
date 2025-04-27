@@ -110,7 +110,7 @@ class AmuCtrlBuffer()(implicit override val p: Parameters, params: BackendParams
   }
 
   // To AMU
-  val deqPtr = RegInit(new RobPtr)
+  val deqPtr = RegInit(0.U.asTypeOf(new RobPtr))
   val entriesCommit = (0 until CommitWidth).map(i => amuCtrlEntries(deqPtr.value + i.U))
   val commitCandicates = entriesCommit.map(e => e.valid && e.committed)
   val amuReqValids = entriesCommit.map(e => e.valid && e.needAMU && e.writebacked && e.committed)
@@ -154,7 +154,7 @@ class AmuCtrlBuffer()(implicit override val p: Parameters, params: BackendParams
   }
 
   // Walk
-  val currWalkPtr = RegInit(new RobPtr)
+  val currWalkPtr = RegInit(0.U.asTypeOf(new RobPtr))
   when (state === s_idle && io.redirect) {
     currWalkPtr := io.walkPtr
     state := s_walk
