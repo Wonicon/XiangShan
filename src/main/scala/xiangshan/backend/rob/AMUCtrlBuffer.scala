@@ -128,7 +128,7 @@ class AmuCtrlBuffer()(implicit override val p: Parameters, params: BackendParams
   // TODO 但是要避免有 amu 需求的 entry 还没有 writeback 或 commit，这时候不能批量退队当前 commit 窗口。
 
   // Add commit and dequeue logic
-  val commitValidThisLine = Wire(Vec(CommitWidth, Bool()))
+  val commitValidThisLine = VecInit(Seq.fill(CommitWidth)(false.B))
   val hasCommitted = RegInit(VecInit(Seq.fill(CommitWidth)(false.B)))
   val allCommitted = Wire(Bool())
 
