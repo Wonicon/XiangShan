@@ -50,7 +50,7 @@ class AmuCtrlEntry(implicit p: Parameters) extends XSBundle {
  * 4. ROB commit 后，开始与 AMU 握手
  * 5. 保证握手顺序？
  */
-class AmuCtrlBuffer()(implicit val p: Parameters, params: BackendParams) extends XSModule
+class AmuCtrlBuffer()(implicit override val p: Parameters, params: BackendParams) extends XSModule
   with HasXSParameter with HasCircularQueuePtrHelper {
 
   val io = IO(new AmuCtrlBufferIO)
