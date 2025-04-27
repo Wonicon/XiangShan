@@ -249,7 +249,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }.elsewhen(allCommitted || io.commits.isWalk && !changeBankAddrToDeqPtr){
     robBanksRaddrNextLine := Mux(robBanksRaddrThisLine.head(1) === 1.U, 1.U, robBanksRaddrThisLine << 1)
   }.elsewhen(io.commits.isWalk && changeBankAddrToDeqPtr){
-    robBanksRaddrNextLine := UIntToOH(deqPtr.value(deqPtr.value.getWidth-1, bankAddrWidth))z
+    robBanksRaddrNextLine := UIntToOH(deqPtr.value(deqPtr.value.getWidth-1, bankAddrWidth))
   }.otherwise(
     robBanksRaddrNextLine := robBanksRaddrThisLine
   )
