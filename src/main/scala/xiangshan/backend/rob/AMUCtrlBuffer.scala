@@ -79,8 +79,12 @@ class AmuCtrlBuffer()(implicit val p: Parameters, params: BackendParams) extends
     amuCtrlEntries(i).needAMU := needOH.asUInt.orR
   }
 
-  // TODO: need detailed correct logic
-  io.outCanEnqueue := amuCtrlEntries.map(_.valid).reduce(_ || _)
+  // Calculate number of valid entries and new entries to be enqueued
+  val numValidEntries = PopCount(amuCtrlEntries.map(_.valid))
+  val numNewEntries = PopCount(io.enqReqValids.zip(io.enqNeedAMU).map { case (valid, need) => valid && need })
+  
+  // Check if there's enough space in the queue
+  io.outCanEnqueue := numValidEntries + numNewEntries <= (RobSize - RenameWidth).U
 
   // Writeback
   val amuCtrlWb = io.wb.filter(_.bits.amuCtrl.nonEmpty).toSeq
@@ -115,15 +119,37 @@ class AmuCtrlBuffer()(implicit val p: Parameters, params: BackendParams) extends
   io.toAMU.bits.zipWithIndex.foreach { case (amuCtrl, i) =>
     amuCtrl := amuCtrlEntries(deqPtr.value + i.U).amuCtrl
   }
+
   // 假设 amu bus 的 ready 总能接收全部宽度的请求
   // 如果当前 commit window 里所有 amu req 都一次性握手，或者没有 amu req，则可以批量退队
   // (这里都是已经在 ROB 中标记已经 commit 的 entry，没有 AMU 需求可以直接退)
   // TODO 但是要避免有 amu 需求的 entry 还没有 writeback 或 commit，这时候不能批量退队当前 commit 窗口。
-  when (io.toAMU.fire || ~VecInit(amuReqValids).asUInt.orR) {
-    deqPtr := deqPtr + PopCount(VecInit(commitCandicates).asUInt)
+
+  // Add commit and dequeue logic
+  val commitValidThisLine = Wire(Vec(CommitWidth, Bool()))
+  val hasCommitted = RegInit(VecInit(Seq.fill(CommitWidth)(false.B)))
+  val allCommitted = Wire(Bool())
+
+  when(allCommitted) {
+    hasCommitted := 0.U.asTypeOf(hasCommitted)
+  }.elsewhen(io.toAMU.fire) {
     for (i <- 0 until CommitWidth) {
-      // TODO: back to back enqueue?
-      amuCtrlEntries(deqPtr.value + i.U).valid := false.B
+      hasCommitted(i) := commitCandicates(i) || hasCommitted(i)
+    }
+  }
+  allCommitted := io.toAMU.fire && commitCandicates.last
+
+  // Update deqPtr and invalidate entries
+  when(io.toAMU.fire) {
+    val deqSteps = PopCount(VecInit(commitCandicates).asUInt)
+    deqPtr := deqPtr + deqSteps
+    for (i <- 0 until CommitWidth) {
+      when(commitCandicates(i)) {
+        amuCtrlEntries(deqPtr.value + i.U).valid := false.B
+        amuCtrlEntries(deqPtr.value + i.U).needAMU := false.B
+        amuCtrlEntries(deqPtr.value + i.U).writebacked := false.B
+        amuCtrlEntries(deqPtr.value + i.U).committed := false.B
+      }
     }
   }
 
