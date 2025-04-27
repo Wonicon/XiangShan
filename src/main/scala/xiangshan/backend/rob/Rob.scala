@@ -1007,7 +1007,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val enqOH = VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === i.U)).map(x => x._1 && x._2))
     val deqSelOH = deqPtrVec.map(_.value === i.U)
     val needAmuCtrlOH = io.commits.info.zip(deqSelOH).map{ case (info, sel) => info.needAmuCtrl && sel }
-    val amuFireOH = needAmuCtrlOH.map{ io.amuCtrl.ready & _ }
+    val amuFireOH = needAmuCtrlOH.zip(io.amuCtrl.map(_.ready)).map { case (need, ready) => need && ready }
     val commitValidOH = io.commits.commitValid.zip(deqSelOH.zip(amuFireOH)).map { case (v, (s, a)) => v & s & a }
     val commitCond = io.commits.isCommit && commitValidOH.reduce(_ || _)
     assert(PopCount(enqOH) < 2.U, s"robEntries$i enqOH is not one hot")
