@@ -73,8 +73,8 @@ class AmuCtrlBuffer()(implicit override val p: Parameters, params: BackendParams
   // so we only need to mark valid for entries who need amuCtrl.
   for (i <- 0 until RobSize) {
     val indexMatch = io.enqAllocPtrVec.map(_.value === i.U)
-    val enqOH = Wire(VecInit(io.enqReqValids.zip(indexMatch).map(x => x._1 && x._2)))
-    val needOH = Wire(VecInit(io.enqNeedAMU.zip(indexMatch).map(x => x._1 && x._2)))
+    val enqOH = VecInit(io.enqReqValids.zip(indexMatch).map(x => x._1 && x._2))
+    val needOH = VecInit(io.enqNeedAMU.zip(indexMatch).map(x => x._1 && x._2))
     amuCtrlEntries(i).valid := enqOH.asUInt.orR
     amuCtrlEntries(i).needAMU := needOH.asUInt.orR
   }
