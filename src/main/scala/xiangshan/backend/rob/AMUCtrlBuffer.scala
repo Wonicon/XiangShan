@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.experimental.BundleLiterals._
 import org.chipsalliance.cde.config.Parameters
-import utility.HasCircularQueuePtrHelper
+import utility._
 import xiangshan._
 import xiangshan.backend.BackendParams
 import xiangshan.backend.fu.matrix.Bundles._
@@ -24,9 +24,8 @@ class AmuCtrlBufferIO()(implicit val p: Parameters, params: BackendParams) exten
   val deqCommitPtrVec = Input(Vec(CommitWidth, new RobPtr))
   val deqCommitValid = Input(Vec(CommitWidth, Bool()))
 
-  // Redirect
-  val redirect = Input(Bool())
-  val walkPtr = Input(new RobPtr)
+  // Redirect (no need to walk)
+  val redirect = Input(Valid(new Redirect))
 
   // To Amu
   val toAMU = Vec(CommitWidth, DecoupledIO(new AmuCtrlIO))
@@ -55,17 +54,6 @@ class AmuCtrlBuffer()(implicit override val p: Parameters, params: BackendParams
 
   val io = IO(new AmuCtrlBufferIO)
 
-  val s_idle :: s_walk :: Nil = Enum(2)
-  val state = RegInit(s_idle)
-  val state_next = Wire(chiselTypeOf(state))
-
-  // Add walk-related signals
-  val walkPtrVec = Reg(Vec(CommitWidth, new RobPtr))
-  val walkPtrTrue = Reg(new RobPtr)
-  val lastWalkPtr = Reg(new RobPtr)
-  val donotNeedWalk = RegInit(VecInit(Seq.fill(CommitWidth)(false.B)))
-  val walkFinished = walkPtrTrue > lastWalkPtr
-
   val amuCtrlEntries = RegInit(VecInit.fill(RobSize)((new AmuCtrlEntry).Lit(_.valid -> false.B)))
 
   // Enqueue
@@ -88,10 +76,9 @@ class AmuCtrlBuffer()(implicit override val p: Parameters, params: BackendParams
 
   // Writeback
   val amuCtrlWb = io.wb.filter(_.bits.amuCtrl.nonEmpty).toSeq
-  val amuCtrl_wb = amuCtrlWb
   for (i <- 0 until RobSize) {
-    val amuCtrlCanWbSeq = amuCtrl_wb.map(wb => wb.valid && wb.bits.robIdx.value === i.U)
-    val amuCtrlRes = amuCtrlCanWbSeq.zip(amuCtrl_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.amuCtrl.get.asUInt, 0.U) }.fold(0.U)(_ | _)
+    val amuCtrlCanWbSeq = amuCtrlWb.map(wb => wb.valid && wb.bits.robIdx.value === i.U)
+    val amuCtrlRes = amuCtrlCanWbSeq.zip(amuCtrlWb).map { case (canWb, wb) => Mux(canWb, wb.bits.amuCtrl.get.asUInt, 0.U) }.fold(0.U)(_ | _)
     when (amuCtrlEntries(i).valid && amuCtrlRes.orR) {
       amuCtrlEntries(i).writebacked := true.B
       amuCtrlEntries(i).amuCtrl := amuCtrlRes.asTypeOf(new AmuCtrlIO)
@@ -156,92 +143,51 @@ class AmuCtrlBuffer()(implicit override val p: Parameters, params: BackendParams
       }
     }
   }
+  
+  // Debug logging section
+  XSDebug("========== AMUCtrlBuffer Debug Info #%d ==========\n", GTimer())
+  
+  // IO ports
+  XSDebug("--- IO Ports ---\n")
+  XSDebug("enqReqValids: %x\n", io.enqReqValids.asUInt)
+  XSDebug("enqAllocPtrVec: ")
+  for (i <- 0 until RenameWidth) {
+    XSDebug(false, true.B,"%x ", io.enqAllocPtrVec(i).value)
+  }
+  XSDebug("\n")
+  XSDebug("enqNeedAMU: %x\n", VecInit(io.enqNeedAMU.toSeq: Seq[Bool]).asUInt)
+  XSDebug("outCanEnqueue: %x\n", io.outCanEnqueue)
+  XSDebug("deqCommitPtrVec: ")
+  for (i <- 0 until CommitWidth) {
+    XSDebug(false, true.B, "%x ", io.deqCommitPtrVec(i).value)
+  }
+  XSDebug("\n")
+  XSDebug("deqCommitValid: %x\n", VecInit(io.deqCommitValid.toSeq: Seq[Bool]).asUInt)
+  XSDebug("redirect: %x\n", io.redirect.bits.robIdx.value)
+  XSDebug("walkPtr: %x\n", io.redirect.bits.robIdx.value)
+  XSDebug("toAMU.valid: %x\n", VecInit(io.toAMU.map(_.valid).toSeq: Seq[Bool]).asUInt)
+  XSDebug("toAMU.ready: %x\n", VecInit(io.toAMU.map(_.ready).toSeq: Seq[Bool]).asUInt)
 
-  // Walk
-  val currWalkPtr = RegInit(0.U.asTypeOf(new RobPtr))
-  when (state === s_idle && io.redirect) {
-    currWalkPtr := io.walkPtr
-    state := s_walk
+  // State and control signals
+  XSDebug("--- State and Control ---\n")
+  XSDebug("deqPtr: %x\n", deqPtr.value)
+
+  // Buffer status
+  XSDebug("--- Buffer Status ---\n")
+  XSDebug("numValidEntries: %x\n", numValidEntries)
+  XSDebug("numNewEntries: %x\n", numNewEntries)
+  XSDebug("commitValidThisLine: %x\n", VecInit(commitValidThisLine.toSeq: Seq[Bool]).asUInt)
+  XSDebug("hasCommitted: %x\n", VecInit(hasCommitted.toSeq: Seq[Bool]).asUInt)
+  XSDebug("allCommitted: %x\n", allCommitted)
+  XSDebug("\n")
+
+  // Entry status
+  XSDebug("--- Entry Status ---\n")
+  for (i <- 0 until RobSize) {
+    XSDebug("Entry[%d]: valid=%x needAMU=%x writebacked=%x committed=%x\n",
+      i.U, amuCtrlEntries(i).valid, amuCtrlEntries(i).needAMU,
+      amuCtrlEntries(i).writebacked, amuCtrlEntries(i).committed)
   }
 
-  when (state === s_walk) {
-    for (i <- 0 until CommitWidth) {
-      amuCtrlEntries(currWalkPtr.value + i.U).valid := true.B
-      amuCtrlEntries(currWalkPtr.value + i.U).needAMU := true.B
-    }
-    currWalkPtr := currWalkPtr + CommitWidth.U
-  }
-
-  when (currWalkPtr === deqPtr) {
-    state := s_idle
-  }
-
-  // Add walk control logic
-  val shouldWalkVec = Wire(Vec(CommitWidth, Bool()))
-  val walkingPtrVec = RegNext(walkPtrVec)
-
-  when(io.redirect) {
-    shouldWalkVec := 0.U.asTypeOf(shouldWalkVec)
-  }.elsewhen(RegNext(io.redirect)) {
-    shouldWalkVec := 0.U.asTypeOf(shouldWalkVec)
-  }.elsewhen(state === s_walk) {
-    shouldWalkVec := VecInit(walkingPtrVec.map(_ <= lastWalkPtr).zip(donotNeedWalk).map(x => x._1 && !x._2))
-  }.otherwise {
-    shouldWalkVec := 0.U.asTypeOf(shouldWalkVec)
-  }
-
-  // Update walk pointers
-  val deqPtrReadBank = deqPtr.lineHeadPtr
-  val deqPtrVecForWalk = VecInit((0 until CommitWidth).map(i => deqPtrReadBank + i.U))
-  val walkPtrVec_next: Vec[RobPtr] = Mux(io.redirect,
-    deqPtrVecForWalk,
-    Mux((state === s_walk) && !walkFinished, VecInit(walkPtrVec.map(_ + CommitWidth.U)), walkPtrVec)
-  )
-  val walkPtrTrue_next: RobPtr = Mux(io.redirect,
-    deqPtr,
-    Mux((state === s_walk) && !walkFinished, walkPtrVec_next.head, walkPtrTrue)
-  )
-
-  walkPtrVec := walkPtrVec_next
-  walkPtrTrue := walkPtrTrue_next
-
-  // Update lastWalkPtr
-  when(io.redirect) {
-    lastWalkPtr := io.walkPtr
-  }
-
-  // Update donotNeedWalk
-  val walkPtrLowBits = Reg(UInt(log2Up(CommitWidth).W))
-  when(io.redirect) {
-    walkPtrLowBits := io.walkPtr.value(log2Up(CommitWidth)-1, 0)
-  }
-  when(io.redirect) {
-    donotNeedWalk := Fill(donotNeedWalk.length, true.B).asTypeOf(donotNeedWalk)
-  }.elsewhen(RegNext(io.redirect)) {
-    donotNeedWalk := (0 until CommitWidth).map(i => (i.U < walkPtrLowBits))
-  }.otherwise {
-    donotNeedWalk := 0.U.asTypeOf(donotNeedWalk)
-  }
-
-  // Update state
-  state_next := Mux(
-    io.redirect || RegNext(io.redirect), s_walk,
-    Mux(
-      state === s_walk && walkFinished, s_idle,
-      state
-    )
-  )
-  state := state_next
-
-  // Walk amuCtrlEntries
-  when(state === s_walk) {
-    for (i <- 0 until CommitWidth) {
-      when(shouldWalkVec(i)) {
-        amuCtrlEntries(walkingPtrVec(i).value).valid := false.B
-        amuCtrlEntries(walkingPtrVec(i).value).needAMU := false.B
-        amuCtrlEntries(walkingPtrVec(i).value).writebacked := false.B
-        amuCtrlEntries(walkingPtrVec(i).value).committed := false.B
-      }
-    }
-  }
+  XSDebug("===========================================\n")
 }

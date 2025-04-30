@@ -413,8 +413,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   amuBuffer.io.wb := io.writeback
   amuBuffer.io.deqCommitPtrVec := deqPtrVec
   amuBuffer.io.deqCommitValid := io.commits.commitValid
-  amuBuffer.io.redirect := io.redirect.valid
-  amuBuffer.io.walkPtr := walkPtrVec(0)
+  amuBuffer.io.redirect := io.redirect
   io.amuCtrl <> amuBuffer.io.toAMU
 
   private val commitIsMTypeVec = VecInit(io.commits.commitValid.zip(io.commits.info).map { case (valid, info) => io.commits.isCommit && valid && info.isMsettype })
