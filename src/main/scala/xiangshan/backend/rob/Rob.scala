@@ -1510,6 +1510,42 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    * DataBase info:
    * log trigger is at writeback valid
    * */
+  {
+    // Use chisel db to log rob entry enqueue and commit event
+    for (i <- 0 until RobSize) {
+      // each sql table for one entry
+      val rob_table = ChiselDB.createTable(s"Rob_${i}", new RobEntryBundle)
+      rob_table.log(
+        data = robEntries(i),
+        en = robEntries(i).valid,
+        site = s"Rob_${i}",
+        clock = clock,
+        reset = reset
+      )
+    }
+
+    for (i <- 0 until RenameWidth) {
+      // each table for one enqueue
+      val enq_table = ChiselDB.createTable(s"RoB_enq_${i}", io.enq.req(i))
+      enq_table.log(
+        data = io.enq.req(i),
+        en = io.enq.req(i).fire,
+        site = s"RoB_enq_${i}",
+        clock = clock,
+        reset = reset
+      )
+    }
+
+    val commit_table = ChiselDB.createTable(s"RoB_commit", io.commits)
+    commit_table.log(
+      data = io.commits,
+      en = io.commits.isCommit && io.commits.commitValid.reduce(_ || _),
+      site = "RoB_commit",
+      clock = clock,
+      reset = reset
+    )
+  }
+
   if (!env.FPGAPlatform) {
     val instTableName = "InstTable" + p(XSCoreParamsKey).HartId.toString
     val instSiteName = "Rob" + p(XSCoreParamsKey).HartId.toString
