@@ -347,7 +347,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     dest.valid := src.valid && io.enq.canAccept
   }
 
-  val walkDestSizeDeqGroup = RegInit(VecInit(Seq.fill(CommitWidth)(0.U(log2Up(MaxUopSize + 1).W))))
   val realDestSizeSeq = VecInit(robDeqGroup.zip(hasCommitted).map{case (r, h) => Mux(h, 0.U, r.realDestSize)})
   val walkDestSizeSeq = VecInit(robDeqGroup.zip(donotNeedWalk).map{case (r, d) => Mux(d, 0.U, r.realDestSize)})
   val commitSizeSumSeq = VecInit((0 until CommitWidth).map(i => realDestSizeSeq.take(i + 1).reduce(_ +& _)))
@@ -964,9 +963,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }.otherwise{
     donotNeedWalk := 0.U.asTypeOf(donotNeedWalk)
   }
-  walkDestSizeDeqGroup.zip(walkPtrVec_next).map {
-    case (reg, ptrNext) => reg := deqPtrEntry.realDestSize
-  }
   val numValidEntries = distanceBetween(enqPtr, deqPtr)
   val commitCnt = PopCount(io.commits.commitValid)
 
@@ -1002,13 +998,28 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   // update robEntries valid
+  class CommitCondTrace extends Bundle {
+    val cycle = UInt(64.W)
+    val enqOH = Vec(canEnqueue.size, Bool())
+    val deqSelOH = Vec(deqPtrVec.size, Bool())
+    val needAmuCtrlOH = Vec(io.commits.info.size, Bool())
+    val amuFireOH = Vec(io.commits.commitValid.size, Bool())
+    val commitCond2 = Bool()
+    val commitCond = Bool()
+    val needFlush = Bool()
+    val b2bEnq = Bool()
+  }
+
+  val commitCond_tbl = ChiselDB.createTable("CommitCondTrace", new CommitCondTrace)
+
   for (i <- 0 until RobSize) {
     val enqOH = VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === i.U)).map(x => x._1 && x._2))
     val deqSelOH = deqPtrVec.map(_.value === i.U)
     val needAmuCtrlOH = io.commits.info.zip(deqSelOH).map{ case (info, sel) => info.needAmuCtrl && sel }
     val amuFireOH = needAmuCtrlOH.zip(io.amuCtrl.map(_.ready)).map { case (need, ready) => need && ready }
     val commitValidOH = io.commits.commitValid.zip(deqSelOH.zip(amuFireOH)).map { case (v, (s, a)) => v & s & a }
-    val commitCond = io.commits.isCommit && commitValidOH.reduce(_ || _)
+    val commitCond2 = io.commits.isCommit && commitValidOH.reduce(_ || _)
+    val commitCond = io.commits.isCommit && io.commits.commitValid.zip(deqSelOH).map(x => x._1 && x._2).reduce(_ || _)    
     assert(PopCount(enqOH) < 2.U, s"robEntries$i enqOH is not one hot")
     val needFlush = redirectValidReg && Mux(
       (redirectEnd > redirectBegin) && !redirectAll,
@@ -1022,6 +1033,19 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }.elsewhen(needFlush){
       robEntries(i).valid := false.B
     }
+
+    val trace = new CommitCondTrace
+    trace.cycle := GTimer()
+    trace.enqOH := enqOH
+    trace.deqSelOH := deqSelOH
+    trace.needAmuCtrlOH := needAmuCtrlOH
+    trace.amuFireOH := amuFireOH
+    trace.commitCond2 := commitCond2
+    trace.commitCond := commitCond
+    trace.needFlush := needFlush
+    trace.b2bEnq := enqOH.asUInt.orR && !io.redirect.valid
+    commitCond_tbl.log(trace, commitCond || commitCond2 || trace.b2bEnq || needFlush, "rob entry update", clock, reset)
+
   }
 
   // debug_inst update

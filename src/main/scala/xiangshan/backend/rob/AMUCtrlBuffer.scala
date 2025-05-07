@@ -9,7 +9,6 @@ import xiangshan._
 import xiangshan.backend.BackendParams
 import xiangshan.backend.fu.matrix.Bundles._
 
-
 class AmuCtrlBufferIO()(implicit val p: Parameters, params: BackendParams) extends Bundle with HasXSParameter {
   // rob enq
   val enqReqValids = Input(Vec(RenameWidth, Bool()))
@@ -49,6 +48,36 @@ class AmuCtrlEntry(implicit p: Parameters) extends XSBundle {
  * 4. ROB commit 后，开始与 AMU 握手
  * 5. 保证握手顺序？
  */
+class AmuCtrlBufferTrace(implicit val p: Parameters) extends Bundle with HasXSParameter {
+  val cycle = UInt(64.W)
+  // IO ports
+  val io_enqReqValids = Vec(RenameWidth, Bool())
+  val io_enqAllocPtrVec = Vec(RenameWidth, UInt(log2Up(RobSize).W))
+  val io_enqNeedAMU = Vec(RenameWidth, Bool())
+  val io_outCanEnqueue = Bool()
+  val io_deqCommitPtrVec = Vec(CommitWidth, UInt(log2Up(RobSize).W))
+  val io_deqCommitValid = Vec(CommitWidth, Bool())
+  val io_redirect = UInt(log2Up(RobSize).W)
+  val io_toAMU_valid = Vec(CommitWidth, Bool())
+  val io_toAMU_ready = Vec(CommitWidth, Bool())
+  
+  // State and control signals
+  val ctrl_deqPtr = UInt(log2Up(RobSize).W)
+  
+  // Buffer status
+  val buf_numValidEntries = UInt(log2Up(RobSize + 1).W)
+  val buf_numNewEntries = UInt(log2Up(RenameWidth + 1).W)
+  val buf_commitValidThisLine = Vec(CommitWidth, Bool())
+  val buf_hasCommitted = Vec(CommitWidth, Bool())
+  val buf_allCommitted = Bool()
+  
+  // Entry status
+  val entry_valid = Vec(RobSize, Bool())
+  val entry_needAMU = Vec(RobSize, Bool())
+  val entry_writebacked = Vec(RobSize, Bool())
+  val entry_committed = Vec(RobSize, Bool())
+}
+
 class AmuCtrlBuffer()(implicit override val p: Parameters, params: BackendParams) extends XSModule
   with HasXSParameter with HasCircularQueuePtrHelper {
 
@@ -77,11 +106,15 @@ class AmuCtrlBuffer()(implicit override val p: Parameters, params: BackendParams
   // Writeback
   val amuCtrlWb = io.wb.filter(_.bits.amuCtrl.nonEmpty).toSeq
   for (i <- 0 until RobSize) {
-    val amuCtrlCanWbSeq = amuCtrlWb.map(wb => wb.valid && wb.bits.robIdx.value === i.U)
-    val amuCtrlRes = amuCtrlCanWbSeq.zip(amuCtrlWb).map { case (canWb, wb) => Mux(canWb, wb.bits.amuCtrl.get.asUInt, 0.U) }.fold(0.U)(_ | _)
-    when (amuCtrlEntries(i).valid && amuCtrlRes.orR) {
-      amuCtrlEntries(i).writebacked := true.B
-      amuCtrlEntries(i).amuCtrl := amuCtrlRes.asTypeOf(new AmuCtrlIO)
+    val amu_data = amuCtrlWb.map{ wb =>
+      val valid_match = wb.valid && wb.bits.robIdx.value === i.U
+      Mux(valid_match, wb.bits.amuCtrl.get.asUInt, 0.U)
+    }.reduce(_ | _)
+
+    val entry = amuCtrlEntries(i)
+    when (entry.valid && amu_data.orR) {
+      entry.writebacked := true.B
+      entry.amuCtrl := amu_data.asTypeOf(new AmuCtrlIO)
     }
   }
 
@@ -153,51 +186,38 @@ class AmuCtrlBuffer()(implicit override val p: Parameters, params: BackendParams
       }
     }
   }
-  
-  // Debug logging section
-  XSDebug("========== AMUCtrlBuffer Debug Info #%d ==========\n", GTimer())
+
+  // Replace debug logging section with ChiselDB tracing
+  val trace = new AmuCtrlBufferTrace
+  trace.cycle := GTimer()
   
   // IO ports
-  XSDebug("--- IO Ports ---\n")
-  XSDebug("enqReqValids: %x\n", io.enqReqValids.asUInt)
-  XSDebug("enqAllocPtrVec: ")
-  for (i <- 0 until RenameWidth) {
-    XSDebug(false, true.B,"%x ", io.enqAllocPtrVec(i).value)
-  }
-  XSDebug("\n")
-  XSDebug("enqNeedAMU: %x\n", VecInit(io.enqNeedAMU.toSeq: Seq[Bool]).asUInt)
-  XSDebug("outCanEnqueue: %x\n", io.outCanEnqueue)
-  XSDebug("deqCommitPtrVec: ")
-  for (i <- 0 until CommitWidth) {
-    XSDebug(false, true.B, "%x ", io.deqCommitPtrVec(i).value)
-  }
-  XSDebug("\n")
-  XSDebug("deqCommitValid: %x\n", VecInit(io.deqCommitValid.toSeq: Seq[Bool]).asUInt)
-  XSDebug("redirect: %x\n", io.redirect.bits.robIdx.value)
-  XSDebug("walkPtr: %x\n", io.redirect.bits.robIdx.value)
-  XSDebug("toAMU.valid: %x\n", VecInit(io.toAMU.map(_.valid).toSeq: Seq[Bool]).asUInt)
-  XSDebug("toAMU.ready: %x\n", VecInit(io.toAMU.map(_.ready).toSeq: Seq[Bool]).asUInt)
-
+  trace.io_enqReqValids := io.enqReqValids
+  trace.io_enqAllocPtrVec := VecInit(io.enqAllocPtrVec.map(_.value))
+  trace.io_enqNeedAMU := io.enqNeedAMU
+  trace.io_outCanEnqueue := io.outCanEnqueue
+  trace.io_deqCommitPtrVec := VecInit(io.deqCommitPtrVec.map(_.value))
+  trace.io_deqCommitValid := io.deqCommitValid
+  trace.io_redirect := io.redirect.bits.robIdx.value
+  trace.io_toAMU_valid := VecInit(io.toAMU.map(_.valid))
+  trace.io_toAMU_ready := VecInit(io.toAMU.map(_.ready))
+  
   // State and control signals
-  XSDebug("--- State and Control ---\n")
-  XSDebug("deqPtr: %x\n", deqPtr.value)
-
+  trace.ctrl_deqPtr := deqPtr.value
+  
   // Buffer status
-  XSDebug("--- Buffer Status ---\n")
-  XSDebug("numValidEntries: %x\n", numValidEntries)
-  XSDebug("numNewEntries: %x\n", numNewEntries)
-  XSDebug("commitValidThisLine: %x\n", VecInit(commitValidThisLine.toSeq: Seq[Bool]).asUInt)
-  XSDebug("hasCommitted: %x\n", VecInit(hasCommitted.toSeq: Seq[Bool]).asUInt)
-  XSDebug("allCommitted: %x\n", allCommitted)
-  XSDebug("\n")
-
+  trace.buf_numValidEntries := numValidEntries
+  trace.buf_numNewEntries := numNewEntries
+  trace.buf_commitValidThisLine := commitValidThisLine
+  trace.buf_hasCommitted := hasCommitted
+  trace.buf_allCommitted := allCommitted
+  
   // Entry status
-  XSDebug("--- Entry Status ---\n")
-  for (i <- 0 until RobSize) {
-    XSDebug("Entry[%d]: valid=%x needAMU=%x writebacked=%x committed=%x\n",
-      i.U, amuCtrlEntries(i).valid, amuCtrlEntries(i).needAMU,
-      amuCtrlEntries(i).writebacked, amuCtrlEntries(i).committed)
-  }
+  trace.entry_valid := VecInit(amuCtrlEntries.map(_.valid))
+  trace.entry_needAMU := VecInit(amuCtrlEntries.map(_.needAMU))
+  trace.entry_writebacked := VecInit(amuCtrlEntries.map(_.writebacked))
+  trace.entry_committed := VecInit(amuCtrlEntries.map(_.committed))
 
-  XSDebug("===========================================\n")
+  val trace_tbl = ChiselDB.createTable("AmuCtrlBufferTrace", new AmuCtrlBufferTrace)
+  trace_tbl.log(trace, true.B, "amu ctrl buffer trace", clock, reset)
 }
