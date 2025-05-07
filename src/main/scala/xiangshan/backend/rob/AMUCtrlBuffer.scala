@@ -96,6 +96,16 @@ class AmuCtrlBuffer()(implicit override val p: Parameters, params: BackendParams
     }
   }
 
+  // Redirect
+  for (i <- 0 until RobSize) {
+    val redirectCond = io.redirect.valid
+    val robPtr = new RobPtr(RobSize)
+    robPtr.value := i.U
+    when (robPtr.needFlush(io.redirect)) {
+      amuCtrlEntries(i).valid := false.B
+    }
+  }
+
   // To AMU
   val deqPtr = RegInit(0.U.asTypeOf(new RobPtr))
   val entriesCommit = (0 until CommitWidth).map(i => amuCtrlEntries(deqPtr.value + i.U))
