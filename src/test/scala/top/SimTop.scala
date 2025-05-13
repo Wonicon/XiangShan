@@ -115,7 +115,7 @@ object SimTop extends App {
   ChiselDB.init(enableChiselDB && !envInFPGA)
 
   Generator.execute(
-    firrtlOpts,
+    firrtlOpts ++ Array("--warn-conf", "any:s"),
     DisableMonitors(p => new SimTop()(p))(config),
     firtoolOpts
   )

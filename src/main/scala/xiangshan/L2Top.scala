@@ -34,6 +34,7 @@ import utility._
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.trace.{Itype, TraceCoreInterface}
+import coupledL2.MatrixDataBundle
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W))
@@ -186,7 +187,15 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       val l2_hint = ValidIO(new L2ToL1Hint())
       val perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
       // val reset_core = IO(Output(Reset()))
+
+      val matrixDataOut512L2 = Vec(coreParams.L2NBanks, DecoupledIO(new MatrixDataBundle()))
     })
+
+    // Initialize matrixDataOut512L2 with zero
+    io.matrixDataOut512L2.foreach { data =>
+      data.valid := false.B
+      data.bits := 0.U.asTypeOf(new MatrixDataBundle)
+    }
 
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
 
@@ -279,6 +288,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
           l2.io_nodeID := io.nodeID.get
           io.chi.get <> l2.io_chi
         case l2cache: TL2TLCoupledL2 =>
+          io.matrixDataOut512L2 <> l2.io.matrixDataOut512L2
       }
 
       beu.module.io.errors.l2.ecc_error.valid := l2.io.error.valid

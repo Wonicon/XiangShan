@@ -192,7 +192,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqPtr = deqPtrVec(0)
   val walkPtr = walkPtrVec(0)
   val allocatePtrVec = VecInit((0 until RenameWidth).map(i => enqPtrVec(PopCount(io.enq.req.take(i).map(req => req.valid && req.bits.firstUop)))))
-  io.enq.canAccept := allowEnqueue && !hasBlockBackward && rab.io.canEnq && vtypeBuffer.io.canEnq && mtypeBuffer.io.canEnq && !io.fromVecExcpMod.busy
+  io.enq.canAccept := allowEnqueue && !hasBlockBackward && rab.io.canEnq && vtypeBuffer.io.canEnq && mtypeBuffer.io.canEnq && !io.fromVecExcpMod.busy && amuBuffer.io.outCanEnqueue
   io.enq.canAcceptForDispatch := allowEnqueueForDispatch && !hasBlockBackward && rab.io.canEnqForDispatch && vtypeBuffer.io.canEnqForDispatch && mtypeBuffer.io.canEnqForDispatch && !io.fromVecExcpMod.busy
   io.enq.resp := allocatePtrVec
   val canEnqueue = VecInit(io.enq.req.map(req => req.valid && req.bits.firstUop && io.enq.canAccept))
@@ -401,18 +401,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     sink.valid := source.valid && io.enq.canAccept
     sink.bits := source.bits
   }
-
-  /**
-   * connection of [[amuBuffer]]
-   */
-  amuBuffer.io.enqReqValids := io.enq.req.map(_.valid)
-  amuBuffer.io.enqAllocPtrVec := allocatePtrVec
-  amuBuffer.io.enqNeedAMU := io.enq.req.map(req => req.valid && req.bits.needAmuCtrl)
-  amuBuffer.io.wb := io.writeback
-  amuBuffer.io.deqCommitPtrVec := deqPtrVec
-  amuBuffer.io.deqCommitValid := io.commits.commitValid
-  amuBuffer.io.redirect := io.redirect
-  io.amuCtrl <> amuBuffer.io.toAMU
 
   private val commitIsMTypeVec = VecInit(io.commits.commitValid.zip(io.commits.info).map { case (valid, info) => io.commits.isCommit && valid && info.isMsettype })
   private val walkIsMTypeVec = VecInit(io.commits.walkValid.zip(walkInfo).map { case (valid, info) => io.commits.isWalk && valid && info.isMsettype })
@@ -1350,6 +1338,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   io.toVecExcpMod.logicPhyRegMap := rab.io.toVecExcpMod.logicPhyRegMap
   io.toVecExcpMod.excpInfo := vecExcpInfo
+
+  amuBuffer.connectROB(this)
 
   /**
    * trace

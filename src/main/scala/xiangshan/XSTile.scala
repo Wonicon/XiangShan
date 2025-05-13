@@ -18,7 +18,7 @@ package xiangshan
 
 import org.chipsalliance.cde.config.{Config, Parameters}
 import chisel3._
-import chisel3.util.{Valid, ValidIO, log2Up}
+import chisel3.util.{Valid, ValidIO, log2Up,Arbiter}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
@@ -31,6 +31,8 @@ import utility.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger, Const
 import coupledL2.EnableCHI
 import coupledL2.tl2chi.PortIO
 import xiangshan.backend.trace.TraceCoreInterface
+import xiangshan.backend.fu.matrix.Bundles._
+import xiangshan.backend.fu.matrix._
 
 class XSTile()(implicit p: Parameters) extends LazyModule
   with HasXSParameter
@@ -179,6 +181,11 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     if (debugOpts.ResetGen && enableL2) {
       core.module.reset := l2top.module.reset_core
     }
+    val amuCtrlArbiter = Module(new Arbiter(new AmuCtrlIO, CommitWidth))
+
+    amuCtrlArbiter.io.in <> core.module.io.amuCtrl
+    amuCtrlArbiter.io.out.ready := true.B
+    l2top.module.io.matrixDataOut512L2 := DontCare
   }
 
   lazy val module = new XSTileImp(this)
