@@ -195,9 +195,11 @@ object macros extends ScalaModule {
   def scalaReflectIvy = ivy"org.scala-lang:scala-reflect:${defaultScalaVersion}"
 }
 
-object hbl2demo extends $file.`HBL2-AMU-Demo`.common.Hbl2DemoModule with HasChisel {
+object hbl2demo extends $file.`HBL2-AMU-Demo`.common.hbl2demoModule with HasChisel {
 
   override def millSourcePath = pwd / "HBL2-AMU-Demo"
+
+  def rocketModule: ScalaModule = rocketchip
 
   def coupledL2Module: ScalaModule = coupledL2
 
