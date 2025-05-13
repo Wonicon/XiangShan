@@ -163,6 +163,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val rab = Module(new RenameBuffer(RabSize))
   val vtypeBuffer = Module(new VTypeBuffer(VTypeBufferSize))
   val mtypeBuffer = Module(new MTypeBuffer(MTypeBufferSize))
+  val amuBuffer = Module(new AmuCtrlBuffer())
   val bankNum = 8
   assert(RobSize % bankNum == 0, "RobSize % bankNum must be 0")
   val robEntries = RegInit(VecInit.fill(RobSize)((new RobEntryBundle).Lit(_.valid -> false.B)))
@@ -191,7 +192,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqPtr = deqPtrVec(0)
   val walkPtr = walkPtrVec(0)
   val allocatePtrVec = VecInit((0 until RenameWidth).map(i => enqPtrVec(PopCount(io.enq.req.take(i).map(req => req.valid && req.bits.firstUop)))))
-  io.enq.canAccept := allowEnqueue && !hasBlockBackward && rab.io.canEnq && vtypeBuffer.io.canEnq && mtypeBuffer.io.canEnq && !io.fromVecExcpMod.busy
+  io.enq.canAccept := allowEnqueue && !hasBlockBackward && rab.io.canEnq && vtypeBuffer.io.canEnq && mtypeBuffer.io.canEnq && !io.fromVecExcpMod.busy && amuBuffer.io.outCanEnqueue
   io.enq.canAcceptForDispatch := allowEnqueueForDispatch && !hasBlockBackward && rab.io.canEnqForDispatch && vtypeBuffer.io.canEnqForDispatch && mtypeBuffer.io.canEnqForDispatch && !io.fromVecExcpMod.busy
   io.enq.resp := allocatePtrVec
   val canEnqueue = VecInit(io.enq.req.map(req => req.valid && req.bits.firstUop && io.enq.canAccept))
@@ -395,7 +396,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    * connection of [[mtypeBuffer]]
    */
   mtypeBuffer.io.redirect.valid := io.redirect.valid
-  
+
   mtypeBuffer.io.req.zip(io.enq.req).map { case (sink, source) =>
     sink.valid := source.valid && io.enq.canAccept
     sink.bits := source.bits
@@ -842,8 +843,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       debug_exuData(walkPtrVec(i).value)
     )
 
-    io.amuCtrl(i).valid := io.commits.isCommit && io.commits.commitValid(i) && commitInfo(i).needAmuCtrl
-    io.amuCtrl(i).bits := commitInfo(i).amuCtrl
+    // io.amuCtrl(i).valid := io.commits.isCommit && io.commits.commitValid(i) && commitInfo(i).needAmuCtrl
+    // io.amuCtrl(i).bits := commitInfo(i).amuCtrl
   }
 
   // sync fflags/dirty_fs/vxsat to csr
@@ -985,26 +986,55 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   // update robEntries valid
+  class CommitCondTrace extends Bundle {
+    val cycle = UInt(64.W)
+    val enqOH = Vec(canEnqueue.size, Bool())
+    val deqSelOH = Vec(deqPtrVec.size, Bool())
+    val needAmuCtrlOH = Vec(io.commits.info.size, Bool())
+    val amuFireOH = Vec(io.commits.commitValid.size, Bool())
+    val commitCond = Bool()
+    val commitCond_noAMUbackpressure = Bool()
+    val needFlush = Bool()
+    val b2bEnq = Bool()
+  }
+
+  val commitCond_tbl = ChiselDB.createTable("CommitCondTrace", new CommitCondTrace)
+
   for (i <- 0 until RobSize) {
     val enqOH = VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === i.U)).map(x => x._1 && x._2))
     val deqSelOH = deqPtrVec.map(_.value === i.U)
     val needAmuCtrlOH = io.commits.info.zip(deqSelOH).map{ case (info, sel) => info.needAmuCtrl && sel }
-    val amuFireOH = io.amuCtrl.zip(needAmuCtrlOH).map{ case (amuIO, needAmu) => amuIO.ready & needAmu }
+    val amuFireOH = needAmuCtrlOH.zip(io.amuCtrl.map(_.ready)).map { case (need, ready) => need && ready }
     val commitValidOH = io.commits.commitValid.zip(deqSelOH.zip(amuFireOH)).map { case (v, (s, a)) => v & s & a }
     val commitCond = io.commits.isCommit && commitValidOH.reduce(_ || _)
+    val commitCond_noAMUbackpressure =
+      io.commits.isCommit && io.commits.commitValid.zip(deqSelOH).map(x => x._1 && x._2).reduce(_ || _)
     assert(PopCount(enqOH) < 2.U, s"robEntries$i enqOH is not one hot")
     val needFlush = redirectValidReg && Mux(
       (redirectEnd > redirectBegin) && !redirectAll,
       (i.U > redirectBegin) && (i.U < redirectEnd),
       (i.U > redirectBegin) || (i.U < redirectEnd)
     )
-    when(commitCond) {
+    when(commitCond_noAMUbackpressure) {
       robEntries(i).valid := false.B
     }.elsewhen(enqOH.asUInt.orR && !io.redirect.valid) {
       robEntries(i).valid := true.B
     }.elsewhen(needFlush){
       robEntries(i).valid := false.B
     }
+
+    val trace = Wire(new CommitCondTrace)
+    trace.cycle := GTimer()
+    trace.enqOH := enqOH
+    trace.deqSelOH := deqSelOH
+    trace.needAmuCtrlOH := needAmuCtrlOH
+    trace.amuFireOH := amuFireOH
+    trace.commitCond := commitCond
+    trace.commitCond_noAMUbackpressure := commitCond_noAMUbackpressure
+    trace.needFlush := needFlush
+    trace.b2bEnq := enqOH.asUInt.orR && !io.redirect.valid
+    commitCond_tbl.log(trace, commitCond || commitCond_noAMUbackpressure || trace.b2bEnq || needFlush,
+                       "rob entry update", clock, reset)
   }
 
   // debug_inst update
@@ -1086,11 +1116,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       }
     }
 
-    val amuCtrlCanWbSeq = amuCtrl_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
-    val amuCtrlRes = amuCtrlCanWbSeq.zip(amuCtrl_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.amuCtrl.get.asUInt, 0.U) }.fold(0.U)(_ | _)
-    when(robEntries(i).valid && amuCtrlRes.orR) {
-      robEntries(i).amuCtrl := amuCtrlRes.asTypeOf(new AmuCtrlIO)
-    }
+    // val amuCtrlCanWbSeq = amuCtrl_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
+    // val amuCtrlRes = amuCtrlCanWbSeq.zip(amuCtrl_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.amuCtrl.get.asUInt, 0.U) }.fold(0.U)(_ | _)
+    // when(robEntries(i).valid && amuCtrlRes.orR) {
+    //   robEntries(i).amuCtrl := amuCtrlRes.asTypeOf(new AmuCtrlIO)
+    // }
 
     val fflagsCanWbSeq = fflags_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.wflags.getOrElse(false.B))
     val fflagsRes = fflagsCanWbSeq.zip(fflags_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.fflags.get, 0.U) }.fold(false.B)(_ | _)
@@ -1164,9 +1194,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       }
     }
 
-    val amuCtrlCanWbSeq = amuCtrl_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i))
-    val amuCtrlRes = amuCtrlCanWbSeq.zip(amuCtrl_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.amuCtrl.get.asUInt, 0.U) }.fold(0.U)(_ | _)
-    needUpdate(i).amuCtrl := Mux(!robBanksRdata(i).valid && instCanEnqFlag, 0.U, robBanksRdata(i).amuCtrl.asUInt | amuCtrlRes).asTypeOf(AmuCtrlIO())
+    // val amuCtrlCanWbSeq = amuCtrl_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i))
+    // val amuCtrlRes = amuCtrlCanWbSeq.zip(amuCtrl_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.amuCtrl.get.asUInt, 0.U) }.fold(0.U)(_ | _)
+    // needUpdate(i).amuCtrl := Mux(!robBanksRdata(i).valid && instCanEnqFlag, 0.U, robBanksRdata(i).amuCtrl.asUInt | amuCtrlRes).asTypeOf(AmuCtrlIO())
 
     val fflagsCanWbSeq = fflags_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i) && writeback.bits.wflags.getOrElse(false.B))
     val fflagsRes = fflagsCanWbSeq.zip(fflags_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.fflags.get, 0.U) }.fold(false.B)(_ | _)
@@ -1211,6 +1241,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   exceptionGen.io.redirect <> io.redirect
   exceptionGen.io.flush := io.flushOut.valid
+
+  amuBuffer.connectROB(this)
 
   val canEnqueueEG = VecInit(io.enq.req.map(req => req.valid && io.enq.canAccept))
   for (i <- 0 until RenameWidth) {
@@ -1493,6 +1525,42 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    * DataBase info:
    * log trigger is at writeback valid
    * */
+  {
+    // Use chisel db to log rob entry enqueue and commit event
+    for (i <- 0 until RobSize) {
+      // each sql table for one entry
+      val rob_table = ChiselDB.createTable(s"Rob_${i}", new RobEntryBundle)
+      rob_table.log(
+        data = robEntries(i),
+        en = robEntries(i).valid,
+        site = s"Rob_${i}",
+        clock = clock,
+        reset = reset
+      )
+    }
+
+    for (i <- 0 until RenameWidth) {
+      // each table for one enqueue
+      val enq_table = ChiselDB.createTable(s"RoB_enq_${i}", io.enq.req(i))
+      enq_table.log(
+        data = io.enq.req(i),
+        en = io.enq.req(i).fire,
+        site = s"RoB_enq_${i}",
+        clock = clock,
+        reset = reset
+      )
+    }
+
+    val commit_table = ChiselDB.createTable(s"RoB_commit", io.commits)
+    commit_table.log(
+      data = io.commits,
+      en = io.commits.isCommit && io.commits.commitValid.reduce(_ || _),
+      site = "RoB_commit",
+      clock = clock,
+      reset = reset
+    )
+  }
+
   if (!env.FPGAPlatform) {
     val instTableName = "InstTable" + p(XSCoreParamsKey).HartId.toString
     val instSiteName = "Rob" + p(XSCoreParamsKey).HartId.toString
