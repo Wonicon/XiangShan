@@ -31,6 +31,8 @@ import utility.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger, Const
 import coupledL2.EnableCHI
 import coupledL2.tl2chi.PortIO
 import xiangshan.backend.trace.TraceCoreInterface
+import xiangshan.backend.fu.matrix.Bundles._
+import hbl2demo.AMU
 
 class XSTile()(implicit p: Parameters) extends LazyModule
   with HasXSParameter
@@ -39,6 +41,10 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   override def shouldBeInlined: Boolean = false
   val core = LazyModule(new XSCore())
   val l2top = LazyModule(new L2Top())
+  val amu: AMU = {
+    val params = l2top.inner.l2cache.get.node.edges.out.head.bundle
+    LazyModule(new AMU)
+  }
 
   val enableL2 = coreParams.L2CacheParamsOpt.isDefined
   // =========== Public Ports ============
@@ -69,6 +75,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   if (!coreParams.softPTW) {
     l2top.inner.misc_l2_pmu := l2top.inner.ptw_logger := l2top.inner.ptw_to_l2_buffer.node := memBlock.ptw_to_l2_buffer.node
   }
+
+  l2top.inner.misc_l2_pmu := amu.matrix_nodes
 
   // L2 Prefetch
   l2top.inner.l2cache match {
@@ -179,6 +187,12 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     if (debugOpts.ResetGen && enableL2) {
       core.module.reset := l2top.module.reset_core
     }
+
+    val amuCtrl = core.module.io.amuCtrl.head
+    val amuTranslator = Module(new AmuCtrlTranslator)
+    amuTranslator.io.ctrl := amuCtrl
+    amu.module.io <> amuTranslator.io.amu
+    amu.module.io.matrix_data_in <> l2top.module.io.matrixDataOut512L2
   }
 
   lazy val module = new XSTileImp(this)
