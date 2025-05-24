@@ -34,6 +34,7 @@ import xiangshan.frontend._
 import xiangshan.mem.L1PrefetchFuzzer
 import scala.collection.mutable.ListBuffer
 import xiangshan.cache.mmu.TlbRequestIO
+import xiangshan.backend.fu.matrix.Bundles._
 
 abstract class XSModule(implicit val p: Parameters) extends Module
   with HasXSParameter
@@ -99,6 +100,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
       val l2MissMatch = Input(Bool())
       val l3MissMatch = Input(Bool())
     }
+    val amuCtrl = Vec(CommitWidth, Decoupled(new AmuCtrlIO))
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
@@ -183,7 +185,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.storeDebugInfo <> memBlock.io.mem_to_ooo.storeDebugInfo
   
   // top -> AMU
-  backend.io.toAmu.foreach(_.ready := true.B)
+  io.amuCtrl.zip(backend.io.toAmu).foreach { case (amuIO, amuBackend) =>
+    amuIO <> amuBackend
+  }
 
   // top -> memBlock
   memBlock.io.fromTopToBackend.clintTime := io.clintTime
