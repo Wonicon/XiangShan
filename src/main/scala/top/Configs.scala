@@ -502,6 +502,13 @@ class DefaultMatrixConfig(n: Int = 1) extends Config(
         dfilterSize = 48,
       ),
     ))
+    case MatAccKey => MatAcc.CUTE
+    case CuteParamsKey => CuteParams.CUTE_8Tops_128SCP.copy(
+        Debug = CuteDebugParams.AllDebugOn,
+        v3config = Cutev3extParams(
+          TaskCtrl_AutoClear = true,
+        ),
+    )
   })
 )
 
